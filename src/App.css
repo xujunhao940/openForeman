@@ -1,0 +1,223 @@
+.app-shell {
+    --sidebar-motion-duration: 320ms;
+    --sidebar-motion-easing: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.titlebar {
+    z-index: 30;
+    app-region: drag;
+    -webkit-app-region: drag;
+    background: var(--color-accent);
+    /* Keep the trigger fixed beside the macOS traffic lights. */
+    padding-left: 88px;
+    padding-right: 140px;
+}
+
+.titlebar button {
+    app-region: no-drag;
+    -webkit-app-region: no-drag;
+}
+
+.sidebar [data-slot="sidebar-inner"] {
+    padding-top: 36px;
+}
+
+[data-slot="sidebar"][data-mobile="true"] {
+    padding-top: 36px;
+}
+
+/* Keep the active sidebar item at the same weight as its resting state. */
+.sidebar [data-slot="sidebar-menu-button"][data-active] {
+    font-weight: inherit;
+}
+
+.sidebar-brand {
+    min-height: 48px;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    padding: 0 14px;
+    font-family: "Instrument Serif", "Noto Serif SC", serif;
+    font-size: 27px;
+    font-weight: 400;
+    line-height: 1;
+}
+
+.sidebar-brand-mark {
+    display: grid;
+    width: 25px;
+    height: 25px;
+    place-items: center;
+    border-radius: 6px;
+    background: #29392f;
+    color: #f7f8f5;
+    font-size: 13px;
+}
+
+.projects-heading {
+    position: relative;
+    z-index: 31;
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    justify-content: space-between;
+    padding-right: 8px;
+}
+
+.add-project-button {
+    width: 28px;
+    height: 28px;
+    color: var(--sidebar-foreground);
+}
+
+.add-project-button,
+.add-project-button:hover {
+    background: transparent;
+}
+
+.add-project-button > svg {
+    color: color-mix(in srgb, var(--sidebar-foreground) 40%, transparent);
+    transition: color 150ms ease;
+}
+
+.add-project-button:hover > svg {
+    color: var(--sidebar-foreground);
+}
+
+.project-nav-item {
+    padding: 8px 12px;
+    padding-right: 64px !important;
+    height: 36px;
+}
+
+.project-new-chat-action {
+    inset-inline-end: 30px;
+}
+
+.project-item-action,
+.project-item-action:hover {
+    background: transparent;
+}
+
+.project-item-action > svg {
+    color: color-mix(in srgb, var(--sidebar-foreground) 40%, transparent);
+    transition: color 150ms ease;
+}
+
+.project-item-action:hover > svg {
+    color: var(--sidebar-foreground);
+}
+
+.project-nav-copy {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    line-height: 1.2;
+}
+
+.project-nav-name,
+.project-nav-path {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.project-nav-name {
+    font-size: 13px;
+}
+
+.project-chat-submenu {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    transform: none;
+    gap: 0;
+}
+
+.project-chat-collapse {
+    height: var(--collapsible-panel-height);
+    overflow: hidden;
+    opacity: 1;
+    transition: height var(--sidebar-motion-duration) var(--sidebar-motion-easing),
+                opacity var(--sidebar-motion-duration) var(--sidebar-motion-easing);
+}
+
+.project-chat-collapse[data-starting-style],
+.project-chat-collapse[data-ending-style] {
+    height: 0;
+    opacity: 0;
+}
+
+.project-chat-submenu [data-slot="sidebar-menu-sub-button"] {
+    color: var(--sidebar-foreground);
+    width: 100%;
+    height: 36px;
+    padding: 8px 32px 8px 36px;
+    transform: none;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.project-chat-archive-action {
+    top: 8px;
+    inset-inline-end: 4px;
+}
+
+@media (min-width: 768px) {
+    .project-chat-archive-action {
+        opacity: 0;
+    }
+
+    [data-slot="sidebar-menu-sub-item"]:hover .project-chat-archive-action,
+    [data-slot="sidebar-menu-sub-item"]:focus-within .project-chat-archive-action {
+        opacity: 1;
+    }
+}
+
+.project-chat-submenu [data-slot="sidebar-menu-sub-button"][data-active] {
+    font-weight: 500;
+}
+
+.project-nav-path {
+    color: var(--sidebar-foreground);
+    opacity: 0.58;
+    font-size: 11px;
+}
+
+.add-project-fields {
+    display: grid;
+    gap: 16px;
+    padding: 20px 0;
+}
+
+.app-shell [data-collapsible="icon"] .project-nav-copy,
+.app-shell [data-collapsible="icon"] .projects-heading [data-slot="sidebar-group-label"] {
+    display: none;
+}
+
+.app-shell [data-collapsible="icon"] .projects-heading {
+    justify-content: center;
+    padding: 0;
+}
+
+.app-shell [data-slot="sidebar-gap"],
+.app-shell [data-slot="sidebar-container"] {
+    transition-duration: var(--sidebar-motion-duration);
+    transition-timing-function: var(--sidebar-motion-easing);
+}
+
+.app-shell[data-resizing="true"] [data-slot="sidebar-gap"],
+.app-shell[data-resizing="true"] [data-slot="sidebar-container"] {
+    transition-duration: 0ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .app-shell {
+        --sidebar-motion-duration: 0ms;
+    }
+}
+
