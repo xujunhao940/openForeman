@@ -1,4 +1,5 @@
 import { ipcRenderer, contextBridge } from 'electron'
+import type {AgentAPI, AgentEvent} from '../shared/agent'
 
 // --------- Expose some API to the Renderer process ---------
 contextBridge.exposeInMainWorld('ipcRenderer', {
@@ -29,3 +30,25 @@ contextBridge.exposeInMainWorld('providersAPI', {
   deleteKey: (id: string) => ipcRenderer.invoke('providers:delete-key', id),
   fetchModels: (id: string, baseUrl: string) => ipcRenderer.invoke('providers:fetch-models', id, baseUrl),
 })
+
+const agentAPI: AgentAPI = {
+  config: () => ipcRenderer.invoke('agent:config'),
+  saveConfig: config => ipcRenderer.invoke('agent:save-config', config),
+  start: request => ipcRenderer.invoke('agent:start', request),
+  stop: chatId => ipcRenderer.invoke('agent:stop', chatId),
+  approve: (id, approved) => ipcRenderer.invoke('agent:approve', id, approved),
+  workspace: cwd => ipcRenderer.invoke('agent:workspace', cwd),
+  saveMemory: (cwd, text) => ipcRenderer.invoke('agent:save-memory', cwd, text),
+  restore: (cwd, id) => ipcRenderer.invoke('agent:restore', cwd, id),
+  diff: cwd => ipcRenderer.invoke('agent:diff', cwd),
+  review: cwd => ipcRenderer.invoke('agent:review', cwd),
+  importSkill: directory => ipcRenderer.invoke('agent:import-skill', directory),
+  selectDirectory: () => ipcRenderer.invoke('agent:select-directory'),
+  replay: () => ipcRenderer.invoke('agent:replay'),
+  subscribe: listener => {
+    const handler = (_event: Electron.IpcRendererEvent, event: AgentEvent) => listener(event)
+    ipcRenderer.on('agent:event', handler)
+    return () => ipcRenderer.removeListener('agent:event', handler)
+  },
+}
+contextBridge.exposeInMainWorld('agentAPI', agentAPI)

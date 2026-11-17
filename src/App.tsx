@@ -35,9 +35,11 @@ import {
 import Project from "@/pages/project.tsx"
 import Settings from "@/pages/settings.tsx"
 import Plugins from "@/pages/plugins.tsx"
+import {useAgentEvents} from '@/hooks/use-agent-events'
+import type {AgentMessage} from '../shared/agent'
 
 type ProjectEntry = { id: string; name: string; path: string }
-type ChatMessage = { id: string; role: "assistant" | "user"; text: string }
+type ChatMessage = AgentMessage
 type ProjectChat = { id: string; name: string; messages: ChatMessage[]; archived?: boolean }
 
 const PROJECTS_STORAGE_KEY = "foreman_projects"
@@ -84,6 +86,15 @@ export default function App() {
     const activeProject = projects.find((project) => project.id === activeProjectId) ?? projects[0]
     const activeChats = projectChats[activeProject.id] ?? []
     const activeChatId = activeChatIds[activeProject.id]
+
+    useAgentEvents((event) => {
+        if (event.type !== 'message') return
+        setProjectChats(current => Object.fromEntries(Object.entries(current).map(([projectId, chats]) => [projectId,
+            chats.map(chat => chat.id === event.chatId ? {...chat, messages: chat.messages.some(message => message.id === event.message.id)
+                ? chat.messages.map(message => message.id === event.message.id ? event.message : message)
+                : [...chat.messages, event.message]} : chat),
+        ])))
+    })
 
     useEffect(() => {
         window.localStorage.setItem(CHATS_STORAGE_KEY, JSON.stringify(projectChats))
@@ -165,6 +176,10 @@ export default function App() {
                                             <div className="project-field">
                                                 <Label htmlFor="new-project-path">Folder path</Label>
                                                 <Input id="new-project-path" value={projectPath} onChange={(event) => setProjectPath(event.target.value)} placeholder="/path/to/repository" required />
+                                                {window.agentAPI && <Button type="button" variant="outline" onClick={async () => {
+                                                    const selected = await window.agentAPI.selectDirectory()
+                                                    if (selected) { setProjectPath(selected); if (!projectName) setProjectName(selected.split(/[\\/]/).pop() ?? 'Project') }
+                                                }}><FolderOpen data-icon="inline-start"/>Choose folder</Button>}
                                             </div>
                                         </div>
                                         <DialogFooter>
@@ -226,6 +241,7 @@ export default function App() {
                                                         setActiveProjectId(project.id)
                                                         setSettingsOpen(false)
                                                         setPluginsOpen(false)
+                                                        setExpandedProjects(current => ({...current, [project.id]: true}))
                                                         setDetailsProjectId((current) => current === project.id ? null : project.id)
                                                     }}
                                                 />
@@ -314,7 +330,13 @@ export default function App() {
                 {pluginsOpen ? <Plugins /> : settingsOpen ? <Settings /> : <Project
                     key={activeProject.id}
                     projectId={activeProject.id}
+                    projectPath={activeProject.path}
                     initialName={activeProject.name}
+                    onRenameProject={name => {
+                        const next = projects.map(project => project.id === activeProject.id ? {...project, name} : project)
+                        localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(next))
+                        setProjects(next)
+                    }}
                     showOverview={detailsProjectId === activeProject.id}
                     chats={activeChats}
                     activeChatId={activeChatId}

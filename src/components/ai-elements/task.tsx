@@ -80,7 +80,7 @@ export const TaskContent = ({
     )}
     {...props}
   >
-    <div className="mt-4 space-y-2 border-muted border-s-2 ps-4">
+    <div className="mt-4 flex flex-col gap-2 border-muted border-s-2 ps-4">
       {children}
     </div>
   </CollapsibleContent>

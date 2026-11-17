@@ -31,7 +31,7 @@ function changeCredentials(id: string, encrypted?: string) {
     return operation
 }
 
-async function readKey(id: string) {
+export async function readKey(id: string) {
     await writes
     const encrypted = (await readCredentials())[id]
     if (!encrypted) return ''

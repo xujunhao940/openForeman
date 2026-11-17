@@ -2,6 +2,7 @@ import { app, BrowserWindow } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import {registerProviderHandlers} from './providers'
+import {registerAgentHandlers} from './agent/ipc'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -69,5 +70,6 @@ app.on('activate', () => {
 
 app.whenReady().then(() => {
   registerProviderHandlers()
+  registerAgentHandlers()
   createWindow()
 })

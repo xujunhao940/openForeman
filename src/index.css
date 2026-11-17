@@ -135,3 +135,8 @@
     @apply font-sans;
     }
 }
+
+:root {
+  --diff-add-background: color-mix(in srgb, #22863a 12%, var(--background));
+  --diff-remove-background: color-mix(in srgb, var(--destructive) 12%, var(--background));
+}

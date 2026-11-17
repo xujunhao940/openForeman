@@ -372,6 +372,11 @@
     gap: 12px;
     padding: 20px 0 6px;
 }
+
+/* The standalone plugin page has no settings navigation column at any width. */
+.settings-page.plugins-page { grid-template-columns: minmax(0, 1fr); }
+.plugins-settings { gap: 22px; }
+.plugins-settings .plugins-item-id { white-space: normal; overflow-wrap: anywhere; }
 .providers-toolbar .settings-section-intro { margin: 0; padding: 0; }
 .provider-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
 .provider-base-url { margin: 0; color: var(--settings-subtle); font-size: 11px; overflow-wrap: anywhere; }
@@ -395,3 +400,12 @@
     .model-setting-row { grid-template-columns: 16px minmax(0, 1fr); }
     .model-provider-select { grid-column: 2; width: 100%; }
 }
+
+.permissions-settings { gap: 24px; padding-top: 20px; }
+.permissions-descriptions { display: flex; flex-direction: column; gap: 20px; font-size: 12px; }
+.permissions-descriptions dt { font-weight: 600; margin-bottom: 6px; }
+.permissions-descriptions dd { color: var(--muted-foreground); line-height: 1.6; }
+.plugins-header { flex-wrap: wrap; }
+.plugins-header > div { flex: 1; min-width: 180px; }
+.plugins-header h2 { font-size: 14px; font-weight: 600; }
+.plugins-settings .plugins-header .settings-section-intro { padding-block: 8px 0; }

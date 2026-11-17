@@ -23,6 +23,7 @@ declare namespace NodeJS {
 
 // Used in Renderer process, expose in `preload.ts`
 interface Window {
+  agentAPI?: import('../shared/agent').AgentAPI
   ipcRenderer: import('electron').IpcRenderer
   providersAPI?: {
     readKey: (id: string) => Promise<string>
