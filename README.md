@@ -28,9 +28,9 @@ All ten capabilities ship as application code and remain part of the pi runtime.
 
 | Plugin | Behavior |
 | --- | --- |
-| Subagents | `subagent` starts a separate read-only pi session, returns findings and streams task status. Up to three children, a two-minute time limit, no recursive delegation. |
+| Subagents | In all modes the main agent handles single tasks itself. Delegation requires at least two independent read-only assignments with different deliverables, launched in parallel. Foreman Mode scales the concurrency limit with reasoning effort. Children cannot delegate. |
 | Plan mode | `update_plan` publishes ordered steps. Plan mode blocks file writes, shell commands, memory writes and MCP operations before execution. |
-| Permissions | Ask, Read only and Allow all modes. Ask requires per-call approval for writes, shell, web and MCP. Approval expires after five minutes and is cancelled when the run stops. Disabling the plugin blocks sensitive tools. |
+| Permissions | Ask, Approve for me, Read only and Allow all modes. Ask requires per-call approval for writes, shell, web and MCP. Approve for me uses the selected model to review actions and asks you if review does not approve. Approval expires after five minutes and is cancelled when the run stops. Disabling the plugin blocks sensitive tools. |
 | Checkpoints | File snapshots before and after each run, persisted outside the project; unchanged snapshots are reused. Git repositories use tracked and non-ignored files; other folders exclude build and dependency directories. |
 | Memory | Explicit per-project notes, editable in the UI and through a permission-gated `memory` tool; injected into subsequent sessions. |
 | Web access | `web_fetch` retrieves public HTTP(S) text/HTML/JSON. DNS is checked and pinned, redirects are revalidated, with a 30-second timeout and 1 MiB response limit. It does not provide search-engine results or browser automation. |

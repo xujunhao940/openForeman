@@ -9,6 +9,20 @@ export type Provider = {
 export type ModelPreference = {providerId: string; enabled: boolean}
 export type Model = {id: string; providers: Provider[]; providerId: string; enabled: boolean}
 
+// The model endpoint usually exposes IDs only. Keep this conservative so text-capable
+// chat models remain selectable while dedicated non-text models are disabled.
+const nonTextModelPatterns = [
+    /(?:^|[-_./])(embedding|embeddings|embed|rerank|reranker|cross[-_]?encoder)(?:[-_./]|$)/i,
+    /(?:^|[-_./])(whisper|audio|speech|tts|text[-_]?to[-_]?speech|stt|asr)(?:[-_./]|$)/i,
+    /(?:^|[-_./])(image|images|vision[-_]?only|text[-_]?to[-_]?image|image[-_]?generation)(?:[-_./]|$)/i,
+    /(?:^|[-_./])(video|text[-_]?to[-_]?video)(?:[-_./]|$)/i,
+    /(?:^|[-_./])(moderation|moderations|classifier|classification)(?:[-_./]|$)/i,
+]
+
+export function isTextModel(id: string): boolean {
+    return !nonTextModelPatterns.some((pattern) => pattern.test(id))
+}
+
 export function modelsUnion(providers: Provider[], preferences: Record<string, ModelPreference>): Model[] {
     const models = new Map<string, Provider[]>()
     for (const provider of providers) {
@@ -18,7 +32,7 @@ export function modelsUnion(providers: Provider[], preferences: Record<string, M
         id,
         providers: available,
         providerId: available.find((provider) => provider.id === preferences[id]?.providerId)?.id ?? available[0].id,
-        enabled: preferences[id]?.enabled ?? true,
+        enabled: isTextModel(id) && (preferences[id]?.enabled ?? true),
     })).sort((a, b) => a.id.localeCompare(b.id))
 }
 

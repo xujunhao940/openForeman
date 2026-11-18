@@ -14,6 +14,7 @@ export function registerAgentHandlers() {
     ipcMain.handle('agent:start', (_event, request: RunRequest) => runtime.start(request))
     ipcMain.handle('agent:stop', (_event, chatId: string) => runtime.stop(chatId))
     ipcMain.handle('agent:approve', (_event, id: string, approved: boolean) => runtime.approve(id, approved))
+    ipcMain.handle('agent:enqueue', (_event, chatId: string, text: string, delivery: 'steer' | 'waitlist') => runtime.enqueue(chatId, text, delivery))
     ipcMain.handle('agent:workspace', (_event, cwd: string) => runtime.workspace(cwd))
     ipcMain.handle('agent:save-memory', (_event, cwd: string, text: string) => runtime.saveMemory(cwd, text))
     ipcMain.handle('agent:restore', (_event, cwd: string, id: string) => runtime.restore(cwd, id))

@@ -53,6 +53,8 @@
 }
 
 :root {
+    --diff-add-background: color-mix(in srgb, #22863a 12%, var(--background));
+    --diff-remove-background: color-mix(in srgb, var(--destructive) 12%, var(--background));
     --background: oklch(1 0 0);
     --foreground: oklch(0.147 0.004 49.3);
     --card: oklch(1 0 0);
@@ -134,9 +136,4 @@
   html {
     @apply font-sans;
     }
-}
-
-:root {
-  --diff-add-background: color-mix(in srgb, #22863a 12%, var(--background));
-  --diff-remove-background: color-mix(in srgb, var(--destructive) 12%, var(--background));
 }

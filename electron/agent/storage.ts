@@ -166,10 +166,14 @@ export class CheckpointStore {
     }
 }
 
+async function diffBase(cwd: string) {
+    const hasHead = await exec('git', ['rev-parse', '--verify', 'HEAD'], {cwd}).then(() => true, () => false)
+    return hasHead ? 'HEAD' : (await exec('git', ['hash-object', '-t', 'tree', process.platform === 'win32' ? 'NUL' : '/dev/null'], {cwd})).stdout.trim()
+}
+
 export async function workspaceReview(cwd: string): Promise<ReviewFile[]> {
     const options = {cwd, maxBuffer: 4 * 1024 * 1024}
-    const hasHead = await exec('git', ['rev-parse', '--verify', 'HEAD'], options).then(() => true, () => false)
-    const base = hasHead ? 'HEAD' : (await exec('git', ['hash-object', '-t', 'tree', process.platform === 'win32' ? 'NUL' : '/dev/null'], options)).stdout.trim()
+    const base = await diffBase(cwd)
     const {stdout: stats} = await exec('git', ['diff', base, '--no-ext-diff', '--no-renames', '--numstat', '-z', '--', '.'], options)
     const {stdout: untracked} = await exec('git', ['ls-files', '--others', '--exclude-standard', '-z', '--', '.'], options)
     const tracked = stats.split('\0').filter(Boolean).map(line => {
@@ -199,9 +203,20 @@ export async function workspaceReview(cwd: string): Promise<ReviewFile[]> {
     }
     return files
 }
-export async function workspaceDiff(cwd: string) {
-    const {stdout} = await exec('git', ['diff', 'HEAD', '--no-ext-diff', '--no-color', '--', '.'], {cwd, maxBuffer: 2 * 1024 * 1024}).catch(async () =>
-        exec('git', ['diff', '--no-ext-diff', '--no-color', '--', '.'], {cwd, maxBuffer: 2 * 1024 * 1024}))
-    const {stdout: untracked} = await exec('git', ['ls-files', '--others', '--exclude-standard', '--', '.'], {cwd, maxBuffer: 1024 * 1024})
-    return `${stdout || 'No tracked changes.'}${untracked ? `\n\nUntracked files:\n${untracked}` : ''}`
+export async function workspaceDiff(cwd: string, options?: {path?: string; summary?: boolean}) {
+    const scope = options?.path ? path.relative(cwd, await safeProjectFile(cwd, options.path)) : '.'
+    const base = await diffBase(cwd)
+    const gitOptions = {cwd, maxBuffer: 2 * 1024 * 1024}
+    const diff = (summary: boolean) => exec('git', ['--literal-pathspecs', 'diff', '--relative', base, '--no-ext-diff', '--no-textconv', '--no-color',
+        ...(summary ? ['--numstat'] : []), '--', scope], {...gitOptions, maxBuffer: options && !summary ? 16384 : gitOptions.maxBuffer})
+    const tracked = async () => {
+        if (options?.summary) return (await diff(true)).stdout || 'No tracked changes.'
+        try { return (await diff(false)).stdout || 'No tracked changes.' }
+        catch (error) {
+            if (!options || (error as NodeJS.ErrnoException).code !== 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') throw error
+            return `Patch exceeds 16 KiB. Showing added/deleted line counts. Request a narrower path or read the file in sections.\n${(await diff(true)).stdout}`
+        }
+    }
+    const [patch, untracked] = await Promise.all([tracked(), exec('git', ['--literal-pathspecs', 'ls-files', '--others', '--exclude-standard', '--', scope], gitOptions)])
+    return `${patch}${untracked.stdout ? `\n\nUntracked files:\n${untracked.stdout}` : ''}`
 }

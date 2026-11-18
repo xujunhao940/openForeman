@@ -15,6 +15,7 @@ export type SettingsValues = {
     defaultModel: string
     fallbackModel: string
     routingEnabled: boolean
+    contextWindow: 128000 | 256000 | 512000
     openaiKey: string
     anthropicKey: string
     providers: Provider[]
@@ -32,6 +33,7 @@ const defaults: SettingsValues = {
     defaultModel: "gpt-6-astra",
     fallbackModel: "gpt-6.1-sol",
     routingEnabled: false,
+    contextWindow: 128000,
     openaiKey: "",
     anthropicKey: "",
     providers: [],
@@ -54,6 +56,7 @@ function readSettings(): SettingsValues {
             defaultModel: typeof stored.defaultModel === "string" ? stored.defaultModel : defaults.defaultModel,
             fallbackModel: typeof stored.fallbackModel === "string" ? stored.fallbackModel : defaults.fallbackModel,
             routingEnabled: stored.routingEnabled === true,
+            contextWindow: [128000, 256000, 512000].includes(stored.contextWindow) ? stored.contextWindow : defaults.contextWindow,
             openaiKey: "",
             anthropicKey: "",
             providers: Array.isArray(stored.providers) ? stored.providers.filter((provider: Provider) =>

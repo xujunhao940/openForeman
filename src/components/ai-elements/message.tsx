@@ -29,6 +29,8 @@ import {
   useState,
 } from "react";
 import { Streamdown } from "streamdown";
+import { CodeBlock, CodeBlockCopyButton } from "@/components/ai-elements/code-block";
+import type { ExtraProps } from "streamdown";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];
@@ -323,6 +325,19 @@ export type MessageResponseProps = ComponentProps<typeof Streamdown>;
 
 const streamdownPlugins = { cjk, code, math, mermaid };
 
+const MarkdownCode = ({ children, className, node, ...props }: ComponentProps<"code"> & ExtraProps) => {
+  const languageClass = node?.properties.className;
+  const languageClasses = [className, ...(Array.isArray(languageClass) ? languageClass : [languageClass])];
+  const language = languageClasses
+    .find((value): value is string => typeof value === "string" && value.startsWith("language-"))
+    ?.slice("language-".length);
+  if (!language && node?.properties.dataBlock === undefined) return <code className={className} {...props}>{children}</code>;
+  const source = typeof children === "string" ? children : Array.isArray(children) ? children.join("") : String(children ?? "");
+  return <CodeBlock code={source.replace(/\n$/, "")} language={(language || "text") as import("shiki").BundledLanguage}>
+    <CodeBlockCopyButton />
+  </CodeBlock>;
+};
+
 export const MessageResponse = memo(
   ({ className, ...props }: MessageResponseProps) => (
     <Streamdown
@@ -331,6 +346,7 @@ export const MessageResponse = memo(
         className
       )}
       plugins={streamdownPlugins}
+      components={{ code: MarkdownCode }}
       {...props}
     />
   ),

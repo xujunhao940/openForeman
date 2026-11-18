@@ -3,6 +3,7 @@ import {FolderOpen} from '@gravity-ui/icons'
 import {Alert, AlertDescription} from '@/components/ui/alert'
 import {DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuTrigger} from '@/components/ui/dropdown-menu'
 import {Button} from '@/components/ui/button'
+import {Trash2} from 'lucide-react'
 import {Badge} from '@/components/ui/badge'
 import {Input} from '@/components/ui/input'
 import {Textarea} from '@/components/ui/textarea'
@@ -11,10 +12,10 @@ import {Separator} from '@/components/ui/separator'
 import {Checkpoint, CheckpointIcon, CheckpointTrigger} from '@/components/ai-elements/checkpoint'
 import type {WorkspaceState} from '../../shared/agent'
 
-export function ProjectDetails({open, name, projectPath, workspace, running, pending, onRename, onSaveMemory, onRestore, availableModels, enabledModels, onToggleModel, error}: {
+export function ProjectDetails({open, name, projectPath, workspace, running, pending, onRename, onDelete, onSaveMemory, onRestore, availableModels, enabledModels, onToggleModel, error}: {
     availableModels: string[]; enabledModels: string[]; onToggleModel: (id: string, enabled: boolean) => void; error?: string
     open: boolean; name: string; projectPath: string; workspace: WorkspaceState
-    running: boolean; pending: boolean; onRename: (name: string) => void; onSaveMemory: (text: string) => Promise<void>; onRestore: (id: string) => void
+    running: boolean; pending: boolean; onRename: (name: string) => void; onDelete: () => void; onSaveMemory: (text: string) => Promise<void>; onRestore: (id: string) => void
 }) {
     const [draftName, setDraftName] = useState(name)
     const [memory, setMemory] = useState(workspace.memory)
@@ -34,5 +35,7 @@ export function ProjectDetails({open, name, projectPath, workspace, running, pen
         <section className="project-details-section"><h3>Checkpoints <Badge variant="secondary">{workspace.checkpoints.length}</Badge></h3><p className="project-detail-help">Restore file changes. Conflicting manual edits are preserved.</p><div className="project-checkpoint-list">{workspace.checkpoints.length ? workspace.checkpoints.map((checkpoint, index) => <Checkpoint key={checkpoint.id}><CheckpointIcon/><CheckpointTrigger disabled={running || pending || workspace.cursor === index} onClick={() => onRestore(checkpoint.id)}>{checkpoint.label} · {new Date(checkpoint.createdAt).toLocaleString()} {workspace.cursor === index ? '· Current' : ''}</CheckpointTrigger></Checkpoint>) : <p>Checkpoints appear here after the first agent run.</p>}</div></section>
         <Separator/>
         <section className="project-details-section"><h3>Skills <Badge variant="secondary">{workspace.skills.length}</Badge></h3><p className="project-detail-help">Project skills are enabled automatically. Manage global skills in Plugins.</p>{workspace.skills.map(skill => <div key={skill.filePath} className="project-skill"><strong>{skill.name}</strong><Badge variant="secondary">Enabled</Badge><p>{skill.description}</p></div>)}</section>
+        <Separator/>
+        <section className="project-details-section project-danger-zone"><h3>Danger zone</h3><p className="project-detail-help">Remove this project from Foreman. Files on disk are not deleted.</p><Button variant="destructive" disabled={running || pending} onClick={onDelete}><Trash2 data-icon="inline-start"/>Delete project</Button></section>
     </div>
 }

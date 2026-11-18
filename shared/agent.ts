@@ -13,8 +13,9 @@ export const bundledPlugins = [
     {id: 'skills', name: 'Skills', description: 'Discover project SKILL.md instructions through pi resource loading.'},
 ] as const
 export type PluginId = typeof bundledPlugins[number]['id']
-export type PermissionMode = 'ask' | 'read-only' | 'auto'
+export type PermissionMode = 'ask' | 'approve-for-me' | 'read-only' | 'auto'
 export type AgentMode = 'build' | 'plan' | 'review'
+export type ContextWindow = 128000 | 256000 | 512000
 export type McpServer = {id: string; name: string; enabled: boolean} & (
     {transport: 'http'; url: string} | {transport: 'stdio'; command: string; args: string[]}
 )
@@ -30,18 +31,26 @@ export const defaultAgentConfig: AgentConfig = {
 }
 export type TurnChangeFile = {path: string; status: 'added' | 'modified' | 'deleted'; additions: number; deletions: number; patch: string; binary?: boolean; truncated?: boolean}
 export type ContextUsage = {tokens: number | null; contextWindow: number; percent: number | null}
+export type ResponseUsage = {input: number; output: number; cacheRead: number; cacheWrite: number; total: number}
+export type ForemanDetails = {enabled: boolean; effort: 'low' | 'medium' | 'high' | 'xhigh'; maxSubagents: number}
 export type TurnChanges = {beforeId: string; afterId: string; files: TurnChangeFile[]}
-export type AgentMessage = {id: string; role: 'assistant' | 'user'; text: string; reasoning?: string; changes?: TurnChanges; contextUsage?: ContextUsage}
+export type AgentMessage = {id: string; role: 'assistant' | 'user'; text: string; reasoning?: string; changes?: TurnChanges; contextUsage?: ContextUsage; usage?: ResponseUsage; durationMs?: number; modelId?: string; foreman?: ForemanDetails; delivery?: 'steer' | 'waitlist'}
 export type ReviewFile = {path: string; status: 'added' | 'modified' | 'deleted'; additions: number; deletions: number; patch: string; binary?: boolean; truncated?: boolean}
 export type RunRequest = {
     chatId: string; projectPath: string; text: string; mode: AgentMode
-    provider: Provider; modelId: string; effort: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+    provider: Provider; modelId: string; effort: 'low' | 'medium' | 'high' | 'xhigh'
     history?: AgentMessage[]
     permissionMode?: PermissionMode
+    workspaceMode?: import('./work').WorkspaceMode
+    foremanMode?: boolean
+    contextWindow?: ContextWindow
 }
 export type PermissionRequest = {id: string; runId: string; tool: string; input: string}
 export type ToolTrace = {id: string; name: string; input: string; output?: string; state: 'running' | 'done' | 'error'}
-export type SubagentState = {id: string; task: string; state: 'working' | 'done' | 'error'; text?: string}
+export type SubagentState = {
+    id: string; task: string; state: 'working' | 'done' | 'error'; text?: string
+    detail?: string; modelId?: string; startedAt?: number; durationMs?: number
+}
 export type CheckpointInfo = {id: string; label: string; createdAt: string; files: number}
 export type WorkspaceState = {
     checkpoints: CheckpointInfo[]; cursor: number; memory: string
@@ -63,6 +72,7 @@ export interface AgentAPI {
     start(request: RunRequest): Promise<{runId: string}>
     stop(chatId: string): Promise<void>
     approve(id: string, approved: boolean): Promise<void>
+    enqueue(chatId: string, text: string, delivery: 'steer' | 'waitlist'): Promise<void>
     workspace(projectPath: string): Promise<WorkspaceState>
     saveMemory(projectPath: string, text: string): Promise<void>
     restore(projectPath: string, checkpointId: string): Promise<WorkspaceState>

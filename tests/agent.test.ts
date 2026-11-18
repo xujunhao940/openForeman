@@ -10,13 +10,17 @@ import {StreamableHTTPServerTransport} from '@modelcontextprotocol/sdk/server/st
 import {execFileSync} from 'node:child_process'
 import {CheckpointStore, workspaceDir, safeProjectFile, workspaceDiff, workspaceReview} from '../electron/agent/storage'
 import {PermissionGate} from '../electron/agent/permissions'
-import {AgentRuntime} from '../electron/agent/runtime'
+import {AgentRuntime, foremanModeSubagentLimit} from '../electron/agent/runtime'
 import {connectMcp} from '../electron/agent/mcp'
 import {fetchPublicPage} from '../electron/agent/web'
 import {defaultAgentConfig, type AgentConfig, type AgentEvent, type RunRequest} from '../shared/agent'
 
 const config = (): AgentConfig => structuredClone(defaultAgentConfig)
 const temp = async () => realpath(await mkdtemp(path.join(tmpdir(), 'foreman-test-')))
+
+test('Foreman Mode scales subagent concurrency with reasoning effort', () => {
+    assert.deepEqual(['low', 'medium', 'high', 'xhigh'].map(foremanModeSubagentLimit), [3, 6, 9, 12])
+})
 
 test('checkpoints restore writes, additions and deletions, preserve unrelated edits, and reject conflicts', async () => {
     const root = await temp()
@@ -109,6 +113,10 @@ test('MCP Streamable HTTP discovers and executes tools over the HTTP transport',
 test('pi runtime streams actual SDK events, gates writes, persists sessions, and honors plan mode and plugin toggles', {timeout: 60000}, async () => {
     const root = await temp()
     const requests: Record<string, unknown>[] = []
+    const questions = ['Inspect this repository and report findings.', 'Identify missing regression tests.']
+    let arrivals = 0
+    let releasePair: () => void
+    const pairReady = new Promise<void>(resolve => { releasePair = resolve })
     const server = createServer(async (req, res) => {
         try {
             let raw = ''; for await (const part of req) raw += part
@@ -116,21 +124,34 @@ test('pi runtime streams actual SDK events, gates writes, persists sessions, and
             const messages = body.messages
             const lastUser = messages.map((message: {role: string}) => message.role).lastIndexOf('user')
             const text = JSON.stringify(messages[lastUser]?.content)
+            const reviewingAction = messages.some((message: {role: string; content: unknown}) => message.role === 'system' && JSON.stringify(message.content).includes('You review proposed tool actions'))
             const alreadyCalled = messages.slice(lastUser + 1).some((message: {role: string}) => message.role === 'tool')
             const write = /WRITE/.test(text)
             const plan = /PLAN/.test(text)
             const delegate = /DELEGATE/.test(text)
             const readGlobal = /READ_GLOBAL/.test(text)
-            const tool = write ? {name: 'write', arguments: JSON.stringify({path: 'output.txt', content: 'from pi'})}
+            const childResearch = questions.some(question => text.includes(question))
+            if (childResearch && !alreadyCalled && arrivals < 2) {
+                if (++arrivals === 2) releasePair()
+                await pairReady
+            }
+            const tool = childResearch ? {name: 'read', arguments: JSON.stringify({path: 'README.md'})}
+                : write ? {name: 'write', arguments: JSON.stringify({path: 'output.txt', content: 'from pi'})}
                 : plan ? {name: 'update_plan', arguments: JSON.stringify({steps: ['Inspect project', 'Implement change']})}
-                : delegate ? {name: 'subagent', arguments: JSON.stringify({task: 'Inspect this repository and report findings.'})}
+                : delegate ? {name: 'subagent', arguments: JSON.stringify(text.includes('SOLO') ? {task: questions[0]} : {tasks: text.includes('SINGLE') ? questions.slice(0, 1) : text.includes('DUPLICATE') ? [questions[0], questions[0]] : questions})}
                 : readGlobal ? {name: 'read', arguments: JSON.stringify({path: path.join(root, 'global-skill', 'SKILL.md')})} : null
             res.writeHead(200, {'content-type': 'text/event-stream', 'cache-control': 'no-cache'})
             const chunk = (delta: unknown, finish_reason: string | null = null) => res.write(`data: ${JSON.stringify({id: 'chatcmpl-test', object: 'chat.completion.chunk', created: 1, model: 'mock-model', choices: [{index: 0, delta, finish_reason}]})}\n\n`)
             chunk({role: 'assistant'})
-            if (tool && !alreadyCalled) {
+            if (reviewingAction) {
+                chunk({content: /WRITE_REVIEW_ASK/.test(text) ? 'ASK' : 'APPROVE'}); chunk({}, 'stop')
+            } else if (tool && !alreadyCalled) {
+                if (childResearch) chunk({content: 'Unverified preliminary hypothesis'})
                 chunk({tool_calls: [{index: 0, id: `call_${Date.now()}`, type: 'function', function: tool}]})
                 chunk({}, 'tool_calls')
+            } else if (text.includes('STREAM_PROBE')) {
+                for (let i = 0; i < 120; i++) chunk({content: 'a'})
+                chunk({}, 'stop')
             } else { chunk({content: 'Verified pi response'}); chunk({}, 'stop') }
             res.end('data: [DONE]\n\n')
         } catch (error) { res.writeHead(500); res.end(String(error)) }
@@ -152,7 +173,7 @@ test('pi runtime streams actual SDK events, gates writes, persists sessions, and
     }, async () => 'test-key')
     const request = (chatId: string, text: string, mode: RunRequest['mode'] = 'build'): RunRequest => ({chatId, text, mode, projectPath: cwd,
         provider: {id: 'mock', name: 'Mock', preset: 'custom', baseUrl: `http://127.0.0.1:${address.port}/v1`, models: ['mock-model']},
-        modelId: 'mock-model', effort: 'off'})
+        modelId: 'mock-model', effort: 'medium'})
     async function run(input: RunRequest) {
         events.length = 0
         const {runId} = await runtime.start(input)
@@ -169,6 +190,9 @@ test('pi runtime streams actual SDK events, gates writes, persists sessions, and
         return events.slice()
     }
     try {
+        const skillDir = path.join(cwd, '.pi', 'skills', 'fixture-skill')
+        await mkdir(skillDir, {recursive: true})
+        await writeFile(path.join(skillDir, 'SKILL.md'), '---\nname: fixture-skill\ndescription: Test project skill discovery.\n---\nInspect files before modifying them.\n')
         const first = await run(request('chat-1', 'WRITE'))
         assert.equal(await readFile(path.join(cwd, 'output.txt'), 'utf8'), 'from pi')
         assert.ok(first.some(event => event.type === 'message' && event.message.text.includes('Verified pi response')))
@@ -181,10 +205,8 @@ test('pi runtime streams actual SDK events, gates writes, persists sessions, and
         assert.equal(changed.message.changes.files[0].additions, 1)
         assert.ok(changed.message.contextUsage, 'pi context-window usage is attached to assistant messages')
         assert.ok((changed.message.contextUsage.tokens ?? 0) > 0, 'session context estimate is populated after the response')
+        assert.ok((changed.message.durationMs ?? 0) > 0, 'assistant response duration is attached per message')
         assert.equal(changed.message.text, 'Verified pi response')
-        const skillDir = path.join(cwd, '.pi', 'skills', 'fixture-skill')
-        await mkdir(skillDir, {recursive: true})
-        await writeFile(path.join(skillDir, 'SKILL.md'), '---\nname: fixture-skill\ndescription: Test project skill discovery.\n---\nInspect files before modifying them.\n')
         const state = await runtime.workspace(cwd)
         assert.ok(state.skills.some(skill => skill.name === 'fixture-skill'))
         assert.equal(state.checkpoints.length, 2)
@@ -192,12 +214,20 @@ test('pi runtime streams actual SDK events, gates writes, persists sessions, and
         await assert.rejects(readFile(path.join(cwd, 'output.txt')), {code: 'ENOENT'})
         await runtime.restore(cwd, state.checkpoints[1].id)
         assert.equal(await readFile(path.join(cwd, 'output.txt'), 'utf8'), 'from pi')
+        await writeFile(path.join(cwd, 'outside-change.txt'), 'independent edit')
         const beforeNoop = await run(request('chat-skill-sync', 'Hello'))
         const stable = beforeNoop.find(event => event.type === 'workspace')
         assert.ok(stable?.type === 'workspace')
+        assert.deepEqual(stable.workspace.checkpoints, state.checkpoints, 'chat does not snapshot independent edits')
+        await rm(path.join(cwd, 'outside-change.txt'))
         const noop = await run({...request('chat-noop', 'WRITE'), permissionMode: 'auto'})
         assert.ok(!noop.some(event => event.type === 'message' && event.message.changes), 'identical writes have no undo footer')
         assert.ok(!noop.some(event => event.type === 'permission'), 'per-run auto mode bypasses approval')
+        const reviewed = await run({...request('chat-approved-for-me', 'WRITE_REVIEW_APPROVE'), permissionMode: 'approve-for-me'})
+        assert.ok(reviewed.some(event => event.type === 'tool' && event.tool.name === 'write' && event.tool.state === 'done'))
+        assert.ok(!reviewed.some(event => event.type === 'permission'), 'an approved review does not prompt the user')
+        const needsApproval = await run({...request('chat-approval-fallback', 'WRITE_REVIEW_ASK'), permissionMode: 'approve-for-me'})
+        assert.ok(needsApproval.some(event => event.type === 'permission' && event.request.tool === 'write'))
         const unchanged = noop.find(event => event.type === 'workspace')
         assert.ok(unchanged?.type === 'workspace')
         assert.equal(unchanged.workspace.checkpoints[unchanged.workspace.cursor].id, stable.workspace.checkpoints[stable.workspace.cursor].id, 'no-op runs preserve response undo availability')
@@ -220,8 +250,39 @@ test('pi runtime streams actual SDK events, gates writes, persists sessions, and
         assert.ok(!readonly.some(event => event.type === 'permission'))
         const planned = await run(request('chat-plan2', 'PLAN', 'plan'))
         assert.ok(planned.some(event => event.type === 'plan' && event.steps.length === 2))
-        const delegated = await run(request('chat-delegate', 'DELEGATE'))
-        assert.ok(delegated.some(event => event.type === 'subagent' && event.agent.state === 'done'))
+        const delegated = await run({...request('chat-delegate', 'DELEGATE'), foremanMode: true})
+        assert.equal(arrivals, 2)
+        assert.equal(delegated.filter(event => event.type === 'subagent' && event.agent.state === 'done' && event.agent.text === 'Verified pi response').length, 2)
+        assert.doesNotMatch(JSON.stringify(requests.at(-1)), /Unverified preliminary hypothesis/)
+        for (const invalid of ['SINGLE', 'DUPLICATE']) {
+            const rejected = await run({...request(`chat-${invalid}`, `DELEGATE ${invalid}`), foremanMode: true})
+            assert.ok(!rejected.some(event => event.type === 'subagent'))
+            assert.ok(rejected.some(event => event.type === 'tool' && event.tool.state === 'error'))
+        }
+        const solo = await run(request('chat-solo', 'DELEGATE SOLO'))
+        assert.ok(!solo.some(event => event.type === 'subagent'), 'ordinary mode also rejects legacy single-task calls')
+        assert.ok(solo.some(event => event.type === 'tool' && event.tool.state === 'error'))
+        await run({...request('chat-work', 'Prepare a brief'), workspaceMode: 'work'})
+        assert.match(JSON.stringify(requests.at(-1)), /ForemanWork/)
+        assert.match(JSON.stringify(requests.at(-1)), /Decision brief:/)
+        assert.doesNotMatch(JSON.stringify(requests.at(-1)), /Meeting follow-up:/)
+        console.log('Work brief request bytes', Buffer.byteLength(JSON.stringify(requests.at(-1))))
+        await run({...request('chat-work-review', '审查会议纪要里的表格', 'review'), workspaceMode: 'work'})
+        const reviewPrompt = JSON.stringify(requests.at(-1))
+        assert.match(reviewPrompt, /Meeting follow-up:/)
+        assert.match(reviewPrompt, /Data analysis:/)
+        assert.match(reviewPrompt, /inconsistent figures/)
+        assert.doesNotMatch(reviewPrompt, /Presentation outline:/)
+        const stream = await run(request('stream-probe', 'STREAM_PROBE'))
+        const updates = stream.filter(event => event.type === 'message')
+        console.log('Stream probe message events', updates.length)
+        assert.ok(updates.length < 120)
+        assert.equal(updates.at(-1)?.message.text, 'a'.repeat(120))
+        const startRequests = requests.length
+        const foreman = await run({...request('chat-foreman', 'Inspect the project'), foremanMode: true})
+        console.log("Foreman fixture requests / JSON bytes", requests.length - startRequests, Buffer.byteLength(JSON.stringify(requests.slice(startRequests))))
+        assert.equal(requests.length - startRequests, 1, 'direct Foreman responses need only the main request')
+        assert.ok(!foreman.some(event => event.type === 'subagent'))
         const globalDir = path.join(root, 'global-skill')
         await mkdir(globalDir)
         await writeFile(path.join(globalDir, 'SKILL.md'), '---\nname: readable-global\ndescription: Global reading fixture.\n---\nUse global conventions.\n')
@@ -252,7 +313,7 @@ test('stopping a pending approval cancels the run, clears replay and releases th
     const next = config()
     next.mcpServers = [{id: 'pending', name: 'Awaiting approval', enabled: true, transport: 'stdio', command: process.execPath, args: []}]
     await runtime.saveConfig(next)
-    const request: RunRequest = {chatId: 'pending-chat', projectPath: cwd, text: 'Inspect project', mode: 'build', modelId: 'mock', effort: 'off',
+    const request: RunRequest = {chatId: 'pending-chat', projectPath: cwd, text: 'Inspect project', mode: 'build', modelId: 'mock', effort: 'medium',
         provider: {id: 'mock', name: 'Mock', preset: 'custom', baseUrl: 'http://127.0.0.1:1/v1', models: ['mock']}}
     try {
         await runtime.start(request)
@@ -278,12 +339,25 @@ test('review diff includes tracked changes and untracked files without changing 
         execFileSync('git', ['init', '-q'], {cwd})
         await writeFile(path.join(cwd, 'tracked.txt'), 'before')
         execFileSync('git', ['add', '.'], {cwd})
+        assert.match(await workspaceDiff(cwd), /\+before/, 'review includes staged files before the first commit')
         execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'initial'], {cwd})
         await writeFile(path.join(cwd, 'tracked.txt'), 'after')
         await writeFile(path.join(cwd, 'untracked.txt'), 'new')
         const diff = await workspaceDiff(cwd)
         assert.match(diff, /-before/); assert.match(diff, /\+after/); assert.match(diff, /untracked.txt/)
         assert.equal(execFileSync('git', ['diff', '--cached'], {cwd, encoding: 'utf8'}), '')
+        await writeFile(path.join(cwd, 'large.txt'), 'generated line\n'.repeat(4000))
+        execFileSync('git', ['add', 'large.txt'], {cwd})
+        const full = await workspaceDiff(cwd)
+        const overview = await workspaceDiff(cwd, {})
+        assert.match(overview, /Patch exceeds 16 KiB/)
+        assert.match(overview, /4000\t0\tlarge.txt/)
+        assert.match(overview, /untracked.txt/)
+        const focused = await workspaceDiff(cwd, {path: 'tracked.txt'})
+        assert.match(focused, /-before/)
+        assert.doesNotMatch(focused, /large.txt|untracked.txt/)
+        await assert.rejects(workspaceDiff(cwd, {path: '../outside'}))
+        console.log('Review fixture bytes (full / overview / focused)', ...[full, overview, focused].map(value => Buffer.byteLength(value)))
         assert.ok(workspaceDir('/data', cwd).startsWith('/data/workspaces/'))
     } finally { await rm(cwd, {recursive: true, force: true}) }
 })

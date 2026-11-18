@@ -1,3 +1,6 @@
+import {ChevronsUpDown} from 'lucide-react'
+import {DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem} from '@/components/ui/dropdown-menu'
+import type {WorkspaceMode} from '../shared/work'
 import {useEffect, useState} from "react"
 import {Archive, FolderOpen, Ellipsis as MoreHorizontal, Plus, Puzzle, Gear as Settings2, PencilToSquare as SquarePen} from "@gravity-ui/icons"
 import {TooltipProvider, Tooltip, TooltipContent, TooltipTrigger} from "@/components/ui/tooltip.tsx"
@@ -40,21 +43,25 @@ import type {AgentMessage} from '../shared/agent'
 
 type ProjectEntry = { id: string; name: string; path: string }
 type ChatMessage = AgentMessage
-type ProjectChat = { id: string; name: string; messages: ChatMessage[]; archived?: boolean }
+type ProjectChat = { workspaceMode?: WorkspaceMode; id: string; name: string; messages: ChatMessage[]; archived?: boolean; modelId?: string }
 
 const PROJECTS_STORAGE_KEY = "foreman_projects"
 const CHATS_STORAGE_KEY = "foreman_project_chats"
 const defaultProjects: ProjectEntry[] = [{id: "foreman-model", name: "Foreman", path: "."}]
+function summarizeChat(text: string) {
+    const clean = text.replace(/\s+/g, ' ').trim()
+    return clean.length > 32 ? `${clean.slice(0, 32)}…` : clean || 'New chat'
+}
 
 function readProjectChats(projects: ProjectEntry[]): Record<string, ProjectChat[]> {
     try {
         const saved = JSON.parse(window.localStorage.getItem(CHATS_STORAGE_KEY) ?? "{}") as Record<string, ProjectChat[]>
         return Object.fromEntries(projects.map((project) => {
             const chats = saved[project.id]
-            return [project.id, Array.isArray(chats) && chats.length > 0 ? chats : [{id: crypto.randomUUID(), name: "Chat 1", messages: []}]]
+            return [project.id, Array.isArray(chats) && chats.length > 0 ? chats : [{id: crypto.randomUUID(), name: "New chat", messages: []}]]
         }))
     } catch {
-        return Object.fromEntries(projects.map((project) => [project.id, [{id: crypto.randomUUID(), name: "Chat 1", messages: []}]]))
+        return Object.fromEntries(projects.map((project) => [project.id, [{id: crypto.randomUUID(), name: "New chat", messages: []}]]))
     }
 }
 
@@ -72,9 +79,10 @@ function readProjects(): ProjectEntry[] {
 export default function App() {
     const [projects, setProjects] = useState(readProjects)
     const [projectChats, setProjectChats] = useState(() => readProjectChats(projects))
-    const [activeChatIds, setActiveChatIds] = useState(() => Object.fromEntries(
-        Object.entries(projectChats).map(([projectId, chats]) => [projectId, chats.find((chat) => !chat.archived)?.id ?? ""])
-    ))
+    const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>(() => localStorage.getItem('foreman_workspace_mode') === 'work' ? 'work' : 'code')
+    const [activeChatIds, setActiveChatIds] = useState<Record<string, string>>({})
+    const selectionKey = (projectId: string) => `${workspaceMode}:${projectId}`
+    const inMode = (chat: ProjectChat) => (chat.workspaceMode ?? 'code') === workspaceMode
     const [activeProjectId, setActiveProjectId] = useState(projects[0].id)
     const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({[projects[0].id]: true})
     const [dialogOpen, setDialogOpen] = useState(false)
@@ -84,8 +92,8 @@ export default function App() {
     const [pluginsOpen, setPluginsOpen] = useState(false)
     const [detailsProjectId, setDetailsProjectId] = useState<string | null>(null)
     const activeProject = projects.find((project) => project.id === activeProjectId) ?? projects[0]
-    const activeChats = projectChats[activeProject.id] ?? []
-    const activeChatId = activeChatIds[activeProject.id]
+    const activeChats = (projectChats[activeProject.id] ?? []).filter(inMode)
+    const activeChatId = activeChatIds[selectionKey(activeProject.id)] ?? activeChats.find(chat => !chat.archived)?.id
 
     useAgentEvents((event) => {
         if (event.type !== 'message') return
@@ -110,9 +118,9 @@ export default function App() {
         const nextProjects = [...projects, project]
         setProjects(nextProjects)
         window.localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(nextProjects))
-        const chat = {id: crypto.randomUUID(), name: "Chat 1", messages: []}
+        const chat = {workspaceMode, id: crypto.randomUUID(), name: "New chat", messages: []}
         setProjectChats((current) => ({...current, [project.id]: [chat]}))
-        setActiveChatIds((current) => ({...current, [project.id]: chat.id}))
+        setActiveChatIds((current) => ({...current, [selectionKey(project.id)]: chat.id}))
         setActiveProjectId(project.id)
         setProjectName("")
         setProjectPath("")
@@ -120,10 +128,9 @@ export default function App() {
     }
 
     function createChat(projectId: string) {
-        const chats = projectChats[projectId] ?? []
-        const chat = {id: crypto.randomUUID(), name: `Chat ${chats.length + 1}`, messages: []}
+        const chat = {workspaceMode, id: crypto.randomUUID(), name: "New chat", messages: []}
         setProjectChats((current) => ({...current, [projectId]: [...(current[projectId] ?? []), chat]}))
-        setActiveChatIds((current) => ({...current, [projectId]: chat.id}))
+        setActiveChatIds((current) => ({...current, [selectionKey(projectId)]: chat.id}))
         setExpandedProjects((current) => ({...current, [projectId]: true}))
         return chat.id
     }
@@ -132,9 +139,23 @@ export default function App() {
         setProjectChats((current) => ({
             ...current,
             [projectId]: (current[projectId] ?? []).map((chat) => chat.id === chatId
-                ? {...chat, messages: typeof messages === "function" ? messages(chat.messages) : messages}
+                ? (() => { const next = typeof messages === "function" ? messages(chat.messages) : messages; const firstUser = next.find(message => message.role === 'user'); return {...chat, name: chat.name === 'New chat' && firstUser ? summarizeChat(firstUser.text) : chat.name, messages: next} })()
                 : chat),
         }))
+    }
+
+    function updateChatModel(projectId: string, chatId: string, modelId: string) {
+        setProjectChats(current => ({...current, [projectId]: (current[projectId] ?? []).map(chat => chat.id === chatId ? {...chat, modelId} : chat)}))
+    }
+
+    function deleteProject(projectId: string) {
+        const nextProjects = projects.filter(project => project.id !== projectId)
+        const fallback = nextProjects[0]
+        setProjects(nextProjects)
+        localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(nextProjects))
+        setProjectChats(current => { const next = {...current}; delete next[projectId]; return next })
+        setActiveProjectId(fallback?.id ?? '')
+        setDetailsProjectId(null)
     }
 
     function archiveChat(projectId: string, chatId: string) {
@@ -142,8 +163,8 @@ export default function App() {
             ...current,
             [projectId]: (current[projectId] ?? []).map((chat) => chat.id === chatId ? {...chat, archived: true} : chat),
         }))
-        setActiveChatIds((current) => current[projectId] === chatId
-            ? {...current, [projectId]: (projectChats[projectId] ?? []).find((chat) => chat.id !== chatId && !chat.archived)?.id ?? ""}
+        setActiveChatIds((current) => current[selectionKey(projectId)] === chatId || activeChatId === chatId
+            ? {...current, [selectionKey(projectId)]: (projectChats[projectId] ?? []).find((chat) => inMode(chat) && chat.id !== chatId && !chat.archived)?.id ?? ""}
             : current)
     }
 
@@ -151,7 +172,13 @@ export default function App() {
         <SidebarProvider className="app-shell">
             <Sidebar className="sidebar">
                 <SidebarHeader className="sidebar-brand">
-                    <span>Foreman</span>
+                    <DropdownMenu><DropdownMenuTrigger className="brand-switch" aria-label="Switch workspace mode">{workspaceMode === 'work' ? 'ForemanWork' : 'Foreman'}<ChevronsUpDown size={15}/></DropdownMenuTrigger>
+                        <DropdownMenuContent align="start"><DropdownMenuRadioGroup value={workspaceMode} onValueChange={value => {
+                            if (value !== 'code' && value !== 'work') return
+                            localStorage.setItem('foreman_workspace_mode', value)
+                            setWorkspaceMode(value); setSettingsOpen(false); setPluginsOpen(false); setDetailsProjectId(null)
+                        }}><DropdownMenuRadioItem closeOnClick value="code">Foreman</DropdownMenuRadioItem><DropdownMenuRadioItem closeOnClick value="work">ForemanWork</DropdownMenuRadioItem></DropdownMenuRadioGroup></DropdownMenuContent>
+                    </DropdownMenu>
                 </SidebarHeader>
                 <SidebarContent>
                     <SidebarGroup className="projects-group">
@@ -221,7 +248,7 @@ export default function App() {
                                                 setActiveProjectId(project.id)
                                                 setSettingsOpen(false)
                                                 setPluginsOpen(false)
-                                                setActiveChatIds((current) => ({...current, [project.id]: ""}))
+                                                setActiveChatIds((current) => ({...current, [selectionKey(project.id)]: ""}))
                                             }}
                                         />}>
                                             <SquarePen />
@@ -253,7 +280,7 @@ export default function App() {
                                     </Tooltip>
                                     <CollapsibleContent className="project-chat-collapse">
                                         <SidebarMenuSub className="project-chat-submenu">
-                                            {(projectChats[project.id] ?? []).filter((chat) => !chat.archived).map((chat) => (
+                                            {(projectChats[project.id] ?? []).filter((chat) => inMode(chat) && !chat.archived).map((chat) => (
                                                 <SidebarMenuSubItem key={chat.id}>
                                                     <SidebarMenuSubButton
                                                         size="sm"
@@ -263,7 +290,7 @@ export default function App() {
                                                             setActiveProjectId(project.id)
                                                             setSettingsOpen(false)
                                                             setPluginsOpen(false)
-                                                            setActiveChatIds((current) => ({...current, [project.id]: chat.id}))
+                                                            setActiveChatIds((current) => ({...current, [selectionKey(project.id)]: chat.id}))
                                                         }}
                                                     >
                                                         <span>{chat.name}</span>
@@ -328,7 +355,8 @@ export default function App() {
                     <SidebarTrigger aria-label="切换侧栏" className="h-9 w-9" />
                 </header>
                 {pluginsOpen ? <Plugins /> : settingsOpen ? <Settings /> : <Project
-                    key={activeProject.id}
+                    key={selectionKey(activeProject.id)}
+                    workspaceMode={workspaceMode}
                     projectId={activeProject.id}
                     projectPath={activeProject.path}
                     initialName={activeProject.name}
@@ -337,6 +365,8 @@ export default function App() {
                         localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(next))
                         setProjects(next)
                     }}
+                    onChatModelChange={(chatId, modelId) => updateChatModel(activeProject.id, chatId, modelId)}
+                    onDeleteProject={() => deleteProject(activeProject.id)}
                     showOverview={detailsProjectId === activeProject.id}
                     chats={activeChats}
                     activeChatId={activeChatId}

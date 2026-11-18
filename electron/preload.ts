@@ -37,6 +37,7 @@ const agentAPI: AgentAPI = {
   start: request => ipcRenderer.invoke('agent:start', request),
   stop: chatId => ipcRenderer.invoke('agent:stop', chatId),
   approve: (id, approved) => ipcRenderer.invoke('agent:approve', id, approved),
+  enqueue: (chatId, text, delivery) => ipcRenderer.invoke('agent:enqueue', chatId, text, delivery),
   workspace: cwd => ipcRenderer.invoke('agent:workspace', cwd),
   saveMemory: (cwd, text) => ipcRenderer.invoke('agent:save-memory', cwd, text),
   restore: (cwd, id) => ipcRenderer.invoke('agent:restore', cwd, id),

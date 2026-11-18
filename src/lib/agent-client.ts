@@ -3,6 +3,7 @@ import {modelsUnion, type ModelPreference, type Provider} from './provider-model
 
 export const permissionOptions = [
     {value: 'ask', label: 'Ask before actions'},
+    {value: 'approve-for-me', label: 'Approve for me'},
     {value: 'read-only', label: 'Read only'},
     {value: 'auto', label: 'Allow all actions'},
 ]

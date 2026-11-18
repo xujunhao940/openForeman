@@ -18,10 +18,7 @@
     -webkit-app-region: no-drag;
 }
 
-.sidebar [data-slot="sidebar-inner"] {
-    padding-top: 36px;
-}
-
+.sidebar [data-slot="sidebar-inner"],
 [data-slot="sidebar"][data-mobile="true"] {
     padding-top: 36px;
 }
@@ -41,17 +38,6 @@
     font-size: 27px;
     font-weight: 400;
     line-height: 1;
-}
-
-.sidebar-brand-mark {
-    display: grid;
-    width: 25px;
-    height: 25px;
-    place-items: center;
-    border-radius: 6px;
-    background: #29392f;
-    color: #f7f8f5;
-    font-size: 13px;
 }
 
 .projects-heading {
@@ -221,3 +207,10 @@
     }
 }
 
+
+.brand-switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; border-radius: 5px; -webkit-app-region: no-drag; }
+.brand-switch svg { color: var(--muted-foreground); }
+.work-welcome { margin: auto; padding: 2rem 1rem; text-align: center; }
+.work-welcome h1 { font: 400 clamp(2rem, 4vw, 3.3rem)/1.1 'Instrument Serif', serif; }
+.work-welcome p { color: var(--muted-foreground); margin: .6rem 0 1.3rem; }
+.work-starters { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: center; }
