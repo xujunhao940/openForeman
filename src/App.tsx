@@ -1,7 +1,7 @@
 import {ChevronsUpDown} from 'lucide-react'
 import {DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem} from '@/components/ui/dropdown-menu'
 import type {WorkspaceMode} from '../shared/work'
-import {useEffect, useState} from "react"
+import {useEffect, useEffectEvent, useState} from "react"
 import {Archive, FolderOpen, Ellipsis as MoreHorizontal, Plus, Puzzle, Gear as Settings2, PencilToSquare as SquarePen} from "@gravity-ui/icons"
 import {TooltipProvider, Tooltip, TooltipContent, TooltipTrigger} from "@/components/ui/tooltip.tsx"
 import "./App.css"
@@ -40,6 +40,7 @@ import Settings from "@/pages/settings.tsx"
 import Plugins from "@/pages/plugins.tsx"
 import {useAgentEvents} from '@/hooks/use-agent-events'
 import type {AgentMessage} from '../shared/agent'
+import type {MenuCommand} from '../shared/menu'
 
 type ProjectEntry = { id: string; name: string; path: string }
 type ChatMessage = AgentMessage
@@ -94,6 +95,8 @@ export default function App() {
     const activeProject = projects.find((project) => project.id === activeProjectId) ?? projects[0]
     const activeChats = (projectChats[activeProject.id] ?? []).filter(inMode)
     const activeChatId = activeChatIds[selectionKey(activeProject.id)] ?? activeChats.find(chat => !chat.archived)?.id
+    const titlebarPage = pluginsOpen ? 'Plugins' : settingsOpen ? 'Settings' : null
+    const titlebarChat = activeChats.find(chat => chat.id === activeChatId)?.name ?? 'New chat'
 
     useAgentEvents((event) => {
         if (event.type !== 'message') return
@@ -107,6 +110,35 @@ export default function App() {
     useEffect(() => {
         window.localStorage.setItem(CHATS_STORAGE_KEY, JSON.stringify(projectChats))
     }, [projectChats])
+
+    function openPage(page: 'settings' | 'plugins') {
+        setSettingsOpen(page === 'settings')
+        setPluginsOpen(page === 'plugins')
+    }
+
+    function openNewChat(projectId: string) {
+        setActiveProjectId(projectId)
+        setSettingsOpen(false)
+        setPluginsOpen(false)
+        setActiveChatIds(current => ({...current, [selectionKey(projectId)]: ""}))
+    }
+
+    const handleMenuCommand = useEffectEvent((command: MenuCommand) => {
+        switch (command) {
+            case 'add-project':
+                setDialogOpen(true)
+                break
+            case 'new-chat':
+                openNewChat(activeProject.id)
+                break
+            case 'settings':
+            case 'plugins':
+                openPage(command)
+                break
+        }
+    })
+
+    useEffect(() => window.menuAPI?.subscribe(command => handleMenuCommand(command)), [])
 
     function addProject(event: React.FormEvent<HTMLFormElement>) {
         event.preventDefault()
@@ -122,6 +154,8 @@ export default function App() {
         setProjectChats((current) => ({...current, [project.id]: [chat]}))
         setActiveChatIds((current) => ({...current, [selectionKey(project.id)]: chat.id}))
         setActiveProjectId(project.id)
+        setSettingsOpen(false)
+        setPluginsOpen(false)
         setProjectName("")
         setProjectPath("")
         setDialogOpen(false)
@@ -244,12 +278,7 @@ export default function App() {
                                             showOnHover
                                             className="project-item-action project-new-chat-action"
                                             aria-label={`New chat in ${project.name}`}
-                                            onClick={() => {
-                                                setActiveProjectId(project.id)
-                                                setSettingsOpen(false)
-                                                setPluginsOpen(false)
-                                                setActiveChatIds((current) => ({...current, [selectionKey(project.id)]: ""}))
-                                            }}
+                                            onClick={() => openNewChat(project.id)}
                                         />}>
                                             <SquarePen />
                                         </TooltipTrigger>
@@ -322,10 +351,7 @@ export default function App() {
                         <SidebarMenuItem>
                             <SidebarMenuButton
                                 isActive={pluginsOpen}
-                                onClick={() => {
-                                    setPluginsOpen(true)
-                                    setSettingsOpen(false)
-                                }}
+                                onClick={() => openPage('plugins')}
                                 tooltip="Plugins"
                                 className="settings-nav-item"
                             >
@@ -336,10 +362,7 @@ export default function App() {
                         <SidebarMenuItem>
                             <SidebarMenuButton
                                 isActive={settingsOpen && !pluginsOpen}
-                                onClick={() => {
-                                    setSettingsOpen(true)
-                                    setPluginsOpen(false)
-                                }}
+                                onClick={() => openPage('settings')}
                                 tooltip="Settings"
                                 className="settings-nav-item"
                             >
@@ -352,7 +375,14 @@ export default function App() {
             </Sidebar>
             <main className="min-w-0 flex-1 pt-9">
                 <header className="titlebar fixed inset-x-0 top-0 flex h-9 items-center">
-                    <SidebarTrigger aria-label="切换侧栏" className="h-9 w-9" />
+                    <SidebarTrigger aria-label="切换侧栏" className="h-9 w-9 shrink-0" />
+                    <div className="titlebar-location">
+                        {titlebarPage ? <span className="truncate">{titlebarPage}</span> : <>
+                            <span className="titlebar-project truncate">{activeProject.name}</span>
+                            <span className="titlebar-separator" aria-hidden="true">/</span>
+                            <span className="truncate">{titlebarChat}</span>
+                        </>}
+                    </div>
                 </header>
                 {pluginsOpen ? <Plugins /> : settingsOpen ? <Settings /> : <Project
                     key={selectionKey(activeProject.id)}

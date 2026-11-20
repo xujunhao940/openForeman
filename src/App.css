@@ -7,10 +7,31 @@
     z-index: 30;
     app-region: drag;
     -webkit-app-region: drag;
-    background: var(--color-accent);
+    background: var(--sidebar);
+    color: var(--sidebar-foreground);
     /* Keep the trigger fixed beside the macOS traffic lights. */
     padding-left: 88px;
-    padding-right: 140px;
+    padding-right: max(12px, calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%) + 8px));
+}
+
+.titlebar-location {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    min-width: 0;
+    gap: 8px;
+    padding-inline-start: 4px;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+.titlebar-project,
+.titlebar-separator {
+    color: var(--muted-foreground);
+}
+
+.titlebar-separator {
+    flex-shrink: 0;
 }
 
 .titlebar button {
@@ -35,7 +56,7 @@
     gap: 10px;
     padding: 0 14px;
     font-family: "Instrument Serif", "Noto Serif SC", serif;
-    font-size: 27px;
+    font-size: 26px;
     font-weight: 400;
     line-height: 1;
 }
@@ -165,7 +186,7 @@
 }
 
 .project-chat-submenu [data-slot="sidebar-menu-sub-button"][data-active] {
-    font-weight: 500;
+    font-weight: 400;
 }
 
 .project-nav-path {
@@ -210,7 +231,11 @@
 
 .brand-switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; border-radius: 5px; -webkit-app-region: no-drag; }
 .brand-switch svg { color: var(--muted-foreground); }
-.work-welcome { margin: auto; padding: 2rem 1rem; text-align: center; }
-.work-welcome h1 { font: 400 clamp(2rem, 4vw, 3.3rem)/1.1 'Instrument Serif', serif; }
-.work-welcome p { color: var(--muted-foreground); margin: .6rem 0 1.3rem; }
 .work-starters { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: center; }
+
+[data-slot="button"], [data-slot="select-item"], [data-slot="dropdown-menu-item"],
+[data-slot="label"], [data-slot="field-label"], [data-slot="sidebar-menu-button"][data-active] {
+    font-weight: 400;
+}
+
+.sidebar-settings-footer button.settings-nav-item { font-weight: 400; }

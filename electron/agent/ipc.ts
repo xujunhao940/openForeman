@@ -2,7 +2,7 @@ import {app, BrowserWindow, dialog, ipcMain} from 'electron'
 import path from 'node:path'
 import {readKey} from '../providers'
 import {AgentRuntime} from './runtime'
-import type {AgentConfig, RunRequest} from '../../shared/agent'
+import type {AgentConfig, QueueAction, RunRequest} from '../../shared/agent'
 
 export function registerAgentHandlers() {
     const runtime = new AgentRuntime(path.join(app.getPath('userData'), 'agent'), event => {
@@ -14,7 +14,8 @@ export function registerAgentHandlers() {
     ipcMain.handle('agent:start', (_event, request: RunRequest) => runtime.start(request))
     ipcMain.handle('agent:stop', (_event, chatId: string) => runtime.stop(chatId))
     ipcMain.handle('agent:approve', (_event, id: string, approved: boolean) => runtime.approve(id, approved))
-    ipcMain.handle('agent:enqueue', (_event, chatId: string, text: string, delivery: 'steer' | 'waitlist') => runtime.enqueue(chatId, text, delivery))
+    ipcMain.handle('agent:enqueue', (_event, chatId: string, text: string) => runtime.enqueue(chatId, text))
+    ipcMain.handle('agent:update-queue', (_event, chatId: string, id: string, action: QueueAction) => runtime.updateQueue(chatId, id, action))
     ipcMain.handle('agent:workspace', (_event, cwd: string) => runtime.workspace(cwd))
     ipcMain.handle('agent:save-memory', (_event, cwd: string, text: string) => runtime.saveMemory(cwd, text))
     ipcMain.handle('agent:restore', (_event, cwd: string, id: string) => runtime.restore(cwd, id))

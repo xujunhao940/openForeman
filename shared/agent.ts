@@ -31,10 +31,12 @@ export const defaultAgentConfig: AgentConfig = {
 }
 export type TurnChangeFile = {path: string; status: 'added' | 'modified' | 'deleted'; additions: number; deletions: number; patch: string; binary?: boolean; truncated?: boolean}
 export type ContextUsage = {tokens: number | null; contextWindow: number; percent: number | null}
+export type QueuedPrompt = {id: string; text: string; steering?: boolean}
+export type QueueAction = {kind: 'edit'; text: string} | {kind: 'up' | 'down' | 'steer'}
 export type ResponseUsage = {input: number; output: number; cacheRead: number; cacheWrite: number; total: number}
 export type ForemanDetails = {enabled: boolean; effort: 'low' | 'medium' | 'high' | 'xhigh'; maxSubagents: number}
 export type TurnChanges = {beforeId: string; afterId: string; files: TurnChangeFile[]}
-export type AgentMessage = {id: string; role: 'assistant' | 'user'; text: string; reasoning?: string; changes?: TurnChanges; contextUsage?: ContextUsage; usage?: ResponseUsage; durationMs?: number; modelId?: string; foreman?: ForemanDetails; delivery?: 'steer' | 'waitlist'}
+export type AgentMessage = {id: string; role: 'assistant' | 'user'; text: string; reasoning?: string; changes?: TurnChanges; contextUsage?: ContextUsage; runSummary?: boolean; usage?: ResponseUsage; durationMs?: number; modelId?: string; foreman?: ForemanDetails; delivery?: 'steer' | 'waitlist'}
 export type ReviewFile = {path: string; status: 'added' | 'modified' | 'deleted'; additions: number; deletions: number; patch: string; binary?: boolean; truncated?: boolean}
 export type RunRequest = {
     chatId: string; projectPath: string; text: string; mode: AgentMode
@@ -63,6 +65,7 @@ export type AgentEvent = {chatId: string; runId: string} & (
     {type: 'permission'; request: PermissionRequest} |
     {type: 'permission-resolved'; id: string} |
     {type: 'subagent'; agent: SubagentState} |
+    {type: 'queue'; items: QueuedPrompt[]} |
     {type: 'plan'; steps: string[]} |
     {type: 'workspace'; workspace: WorkspaceState}
 )
@@ -72,7 +75,8 @@ export interface AgentAPI {
     start(request: RunRequest): Promise<{runId: string}>
     stop(chatId: string): Promise<void>
     approve(id: string, approved: boolean): Promise<void>
-    enqueue(chatId: string, text: string, delivery: 'steer' | 'waitlist'): Promise<void>
+    enqueue(chatId: string, text: string): Promise<void>
+    updateQueue(chatId: string, id: string, action: QueueAction): Promise<void>
     workspace(projectPath: string): Promise<WorkspaceState>
     saveMemory(projectPath: string, text: string): Promise<void>
     restore(projectPath: string, checkpointId: string): Promise<WorkspaceState>

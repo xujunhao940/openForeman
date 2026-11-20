@@ -1,7 +1,8 @@
 import {workSkills, type WorkspaceMode} from '../../shared/work'
-import {useEffect, useState} from 'react'
+import {useEffect, useRef, useState} from 'react'
 import {ArrowUpRight, Cpu, Stop, Shield, CircleQuestion, EyeClosed, ShieldCheck, Hammer, ListCheck, CodeCompare} from '@gravity-ui/icons'
-import {Zap, Pencil, Check, X, ListPlus} from 'lucide-react'
+import {QueuedPrompts} from '@/components/queued-prompts'
+import {Zap, Pencil, Check, X} from 'lucide-react'
 import {Button} from '@/components/ui/button'
 import {Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger} from '@/components/ui/dialog'
 import {Alert, AlertDescription, AlertTitle} from '@/components/ui/alert'
@@ -60,15 +61,19 @@ export default function Project({workspaceMode, projectId, projectPath, initialN
     const [actionPending, setActionPending] = useState(false)
     const [submitting, setSubmitting] = useState(false)
     const [prompt, setPrompt] = useState('')
-    const [delivery, setDelivery] = useState<'steer' | 'waitlist'>('steer')
     const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
     const [editingText, setEditingText] = useState('')
+    const composerRef = useRef<HTMLDivElement>(null)
+    const [composerHeight, setComposerHeight] = useState(0)
     const run = useAgentRun(activeChatId)
     const running = submitting || run.status === 'starting' || run.status === 'running'
     const messages = activeChat?.messages ?? []
     const permissionMode = permissionOverride ?? config.permissionMode
     const contextUsage = messages.slice().reverse().find(message => message.contextUsage)?.contextUsage
     const finalAssistantMessageId = messages.slice().reverse().find(message => message.role === 'assistant')?.id
+    const summaries = messages.filter(message => message.runSummary)
+    const conversationTime = summaries.reduce((sum, message) => sum + (message.durationMs ?? 0), 0)
+    const conversationTokens = summaries.reduce((sum, message) => sum + (message.usage?.total ?? 0), 0)
     function contextWindow() {
         try {
             const value = JSON.parse(localStorage.getItem('foreman_settings') ?? '{}')?.contextWindow
@@ -99,6 +104,16 @@ export default function Project({workspaceMode, projectId, projectPath, initialN
         if (activeChatId) localStorage.setItem(`foreman_chat_mode_${activeChatId}`, String(next))
     }
     useEffect(() => { if (run.workspace) setWorkspace(run.workspace) }, [run.workspace])
+    useEffect(() => {
+        const element = composerRef.current
+        if (!element) return
+        const observer = new ResizeObserver(() => {
+            // Include the dock's padding so transcript space matches its visible footprint.
+            setComposerHeight(Math.ceil(element.getBoundingClientRect().height))
+        })
+        observer.observe(element)
+        return () => observer.disconnect()
+    }, [activeChatId, run.queue.length, workspaceMode, messages.length])
 
     useEffect(() => {
         let cancelled = false
@@ -138,8 +153,7 @@ export default function Project({workspaceMode, projectId, projectPath, initialN
             const chatId = activeChat?.id
             if (!chatId) return
             await action(async () => {
-                await agentAPI().enqueue(chatId, text.trim(), delivery)
-                onMessagesChange(chatId, current => [...current, {id: crypto.randomUUID(), role: 'user', text: text.trim(), delivery}])
+                await agentAPI().enqueue(chatId, text.trim())
                 setPrompt('')
             })
             return
@@ -202,7 +216,7 @@ export default function Project({workspaceMode, projectId, projectPath, initialN
                             {agent.text && <CardContent><Task defaultOpen={false}><TaskTrigger title="Findings"/><TaskContent><MessageResponse>{agent.text}</MessageResponse></TaskContent></Task></CardContent>}
                         </Card>)}</div>
                     </section>}
-                    <Conversation className="project-conversation"><ConversationContent>
+                    <Conversation className="project-conversation" style={{"--agent-composer-height": `${composerHeight}px`} as React.CSSProperties}><ConversationContent className="project-conversation-content">
                         {messages.length ? messages.map(message => <Message key={message.id} from={message.role}>
                             <MessageContent>
                                 {message.reasoning && <Reasoning isStreaming={running && message.id === messages[messages.length - 1]?.id}><ReasoningTrigger/><ReasoningContent>{message.reasoning}</ReasoningContent></Reasoning>}
@@ -210,7 +224,11 @@ export default function Project({workspaceMode, projectId, projectPath, initialN
                                 {message.delivery && <span className="agent-message-delivery">{message.delivery === 'steer' ? 'Steered into current run' : 'Added to waitlist'}</span>}
                             </MessageContent>
                             {message.role === 'user' && !running && editingMessageId !== message.id && <div className="agent-message-actions"><Button size="icon-sm" variant="ghost" aria-label="Edit message" title="Edit message" onClick={() => {setEditingMessageId(message.id); setEditingText(message.text)}}><Pencil/></Button></div>}
-                        </Message>) : workspaceMode === 'work' ? <div className="work-welcome"><h1>What are you working on?</h1><p>Use files in {initialName} to create a deliverable.</p>{config.plugins.skills && <div className="work-starters">{workSkills.map(skill => <Button key={skill.name} variant="outline" onClick={() => {setPrompt(skill.starter); document.querySelector<HTMLTextAreaElement>('.project-prompt textarea')?.focus()}}>{skill.name}</Button>)}</div>}</div> : <ConversationEmptyState title="What are we building?" description="Plan a change, work with your codebase, or review your diff. Your agent runs locally on pi." icon={<Cpu/>}/>}
+                        </Message>) : <ConversationEmptyState
+                            title={workspaceMode === 'work' ? 'What are you working on?' : 'What are we building?'}
+                            description={workspaceMode === 'work' ? `Use files in ${initialName} to create a deliverable.` : 'Plan a change, work with your codebase, or review your diff. Your agent runs locally on pi.'}
+                            icon={<Cpu/>}
+                        />}
                         {run.steps.length > 0 && <Plan defaultOpen><PlanHeader><PlanTitle>Implementation plan</PlanTitle><PlanDescription>{mode === 'plan' ? 'Read-only planning · switch to Build when ready.' : 'Current agent plan'}</PlanDescription></PlanHeader><PlanContent><ol className="agent-plan-steps">{run.steps.map((step, i) => <li key={`${i}-${step}`}>{step}</li>)}</ol></PlanContent></Plan>}
                         {run.tools.length > 0 && <Task defaultOpen={false}><TaskTrigger title={`Tool activity · ${run.tools.length} calls`}/><TaskContent><div className="agent-tool-list">{run.tools.map(tool => <Task key={tool.id} defaultOpen={false}><TaskTrigger title={`${tool.name} · ${tool.state}`}/><TaskContent><TaskItem><pre>{tool.input}</pre>{tool.output && <pre>{tool.output}</pre>}</TaskItem></TaskContent></Task>)}</div></TaskContent></Task>}
                         {running && <p role="status" className="agent-running">{run.permissions.length ? 'Waiting for your permission…' : 'Agent is working…'}</p>}
@@ -223,7 +241,7 @@ export default function Project({workspaceMode, projectId, projectPath, initialN
                                     {message.foreman && <span>{message.foreman.effort} effort</span>}
                                 </DialogTrigger>
                                 <DialogContent>
-                                    <DialogHeader><DialogTitle>Response usage</DialogTitle><DialogDescription>Time and tokens for this answer.</DialogDescription></DialogHeader>
+                                    <DialogHeader><DialogTitle>Response usage</DialogTitle><DialogDescription>{message.runSummary ? 'Elapsed time and reported tokens across this run, including tools, subagents and permission reviews.' : 'Historical model request. Full run statistics were not recorded.'}</DialogDescription></DialogHeader>
                                     <dl className="response-usage-details">
                                         <div><dt>Model</dt><dd>{message.modelId ?? '—'}</dd></div>
                                         {message.foreman && <><div><dt>Foreman Mode</dt><dd>{message.foreman.enabled ? 'Enabled' : 'Disabled'}</dd></div><div><dt>Reasoning effort</dt><dd>{message.foreman.effort}</dd></div><div><dt>Parallel subagents</dt><dd>{message.foreman.enabled ? `Up to ${message.foreman.maxSubagents}` : 'Standard limit'}</dd></div></>}
@@ -233,6 +251,7 @@ export default function Project({workspaceMode, projectId, projectPath, initialN
                                         <div><dt>Cache read</dt><dd>{message.usage?.cacheRead.toLocaleString() ?? '—'}</dd></div>
                                         <div><dt>Cache write</dt><dd>{message.usage?.cacheWrite.toLocaleString() ?? '—'}</dd></div>
                                         <div><dt>Total tokens</dt><dd>{message.usage?.total.toLocaleString() ?? '—'}</dd></div>
+                                        {summaries.length > 0 && <><div><dt>Conversation active time</dt><dd>{formatDuration(conversationTime)}</dd></div><div><dt>Conversation tokens (reported)</dt><dd>{conversationTokens ? conversationTokens.toLocaleString() : '—'}</dd></div><div><dt>Recorded runs</dt><dd>{summaries.length}</dd></div></>}
                                     </dl>
                                 </DialogContent>
                             </Dialog>}
@@ -242,16 +261,31 @@ export default function Project({workspaceMode, projectId, projectPath, initialN
                                 onUndo={() => restore(message.changes.beforeId)} onRedo={() => restore(message.changes.afterId)}/>}
                         </div>)}
                     </ConversationContent><ConversationScrollButton/></Conversation>
-                    <div className="agent-composer">
+                    <div className="agent-composer" ref={composerRef}>
+                        {workspaceMode === 'work' && !messages.length && config.plugins.skills && (
+                            <div className="work-starters">
+                                {workSkills.map(skill => (
+                                    <Button key={skill.name} variant="outline" onClick={() => {
+                                        setPrompt(skill.starter)
+                                        document.querySelector<HTMLTextAreaElement>('.project-prompt textarea')?.focus()
+                                    }}>{skill.name}</Button>
+                                ))}
+                            </div>
+                        )}
+                        <QueuedPrompts key={activeChatId} items={run.queue} disabled={!running || actionPending} update={async (id, operation) => {
+                            setActionPending(true); setError('')
+                            try { await agentAPI().updateQueue(activeChatId, id, operation) }
+                            catch (err) { setError(String(err)); throw err }
+                            finally { setActionPending(false) }
+                        }}/>
                         <PromptInput className="project-prompt" onSubmit={message => submitMessage(message)}>
                             <PromptInputTextarea value={prompt} onChange={event => setPrompt(event.target.value)} placeholder={mode === 'plan' ? 'Describe the change to plan…' : mode === 'review' ? 'What should the agent review?' : workspaceMode === 'work' ? 'Describe your deliverable or reference a file…' : 'Ask Foreman to work on your project…'} aria-label="Message the project agent"/>
                             <PromptInputFooter className="project-prompt-footer"><PromptInputTools className="project-prompt-tools project-prompt-tools-left">
-                                <Select items={[{value:"build",label:"Build"},{value:"plan",label:"Plan"},{value:"review",label:"Review"}]} value={mode} disabled={running} onValueChange={value => value && selectMode(value as AgentMode)}><SelectTrigger aria-label="Agent mode" title={modeLabel(mode)} size="sm" className="composer-mode-trigger"><ModeIcon mode={mode}/><SelectValue className="sr-only"/></SelectTrigger><SelectContent><SelectGroup><SelectItem value="build"><ModeIcon mode="build"/><span>Build</span></SelectItem><SelectItem value="plan" disabled={!config.plugins['plan-mode']}><ModeIcon mode="plan"/><span>Plan</span></SelectItem><SelectItem value="review" disabled={!config.plugins.review || !models.some(model => model.id === 'codex-auto-review')}><ModeIcon mode="review"/><span>Review</span></SelectItem></SelectGroup></SelectContent></Select>
-                                <Select items={permissionOptions} value={permissionMode} disabled={running} onValueChange={value => value && changePermissions(value as PermissionMode)}><SelectTrigger aria-label="Permission mode" size="sm" className="composer-permission-trigger"><PermissionIcon mode={permissionMode}/><SelectValue/></SelectTrigger><SelectContent className="composer-permission-content"><SelectGroup>{permissionOptions.map(option => <SelectItem key={option.value} value={option.value}><PermissionIcon mode={option.value as PermissionMode}/>{option.label}</SelectItem>)}</SelectGroup></SelectContent></Select>
+                                <Select items={[{value:"build",label:"Build"},{value:"plan",label:"Plan"},{value:"review",label:"Review"}]} value={mode} disabled={running} onValueChange={value => value && selectMode(value as AgentMode)}><SelectTrigger aria-label="Agent mode" title={modeLabel(mode)} size="sm" className="composer-mode-trigger"><ModeIcon mode={mode}/><SelectValue className="sr-only"/></SelectTrigger><SelectContent className="composer-left-select-menu"><SelectGroup><SelectItem value="build"><ModeIcon mode="build"/><span>Build</span></SelectItem><SelectItem value="plan" disabled={!config.plugins['plan-mode']}><ModeIcon mode="plan"/><span>Plan</span></SelectItem><SelectItem value="review" disabled={!config.plugins.review || !models.some(model => model.id === 'codex-auto-review')}><ModeIcon mode="review"/><span>Review</span></SelectItem></SelectGroup></SelectContent></Select>
+                                <Select items={permissionOptions} value={permissionMode} disabled={running} onValueChange={value => value && changePermissions(value as PermissionMode)}><SelectTrigger aria-label="Permission mode" size="sm" className="composer-permission-trigger"><PermissionIcon mode={permissionMode}/><SelectValue/></SelectTrigger><SelectContent className="composer-left-select-menu composer-permission-content"><SelectGroup>{permissionOptions.map(option => <SelectItem key={option.value} value={option.value}><PermissionIcon mode={option.value as PermissionMode}/>{option.label}</SelectItem>)}</SelectGroup></SelectContent></Select>
                             </PromptInputTools><div className="project-prompt-tools project-prompt-tools-right">
                                 <DropdownMenu><DropdownMenuTrigger aria-label="Model and reasoning effort" disabled={running || !models.length} render={<Button type="button" size="sm" variant="ghost" className="composer-model-effort"/>}><span className="composer-model-name">{modelId || 'Choose model'}</span><span className="composer-effort-name">{effort}</span><Zap className="composer-radical-icon" aria-hidden="true" fill={foremanMode ? 'currentColor' : 'none'}/></DropdownMenuTrigger><DropdownMenuContent align="start" className="project-model-effort-menu"><DropdownMenuGroup className="project-model-group"><DropdownMenuLabel>Model</DropdownMenuLabel><DropdownMenuRadioGroup className="project-model-list" value={modelId} onValueChange={selectModel}>{models.map(model => <DropdownMenuRadioItem key={model.id} value={model.id}>{model.id}</DropdownMenuRadioItem>)}</DropdownMenuRadioGroup></DropdownMenuGroup><div className="project-effort-menu-heading"><span>Reasoning effort</span><output>{effort}</output></div><Slider disabled={running} value={[efforts.indexOf(effort)]} min={0} max={efforts.length - 1} step={1} thumbLabels={['Reasoning effort']} onValueChange={value => setEffort(efforts[Array.isArray(value) ? value[0] : value])}/><button type="button" className={`foreman-mode-toggle${foremanMode ? ' is-active' : ''}`} aria-label={`${foremanMode ? 'Disable' : 'Enable'} Foreman Mode`} aria-pressed={foremanMode} disabled={running} title="Foreman Mode" onClick={toggleForemanMode}><Zap aria-hidden="true" fill={foremanMode ? 'currentColor' : 'none'}/><span>Foreman Mode</span></button><p className="foreman-mode-description">Handles focused tasks directly. For complex work, independent research can run in parallel.</p></DropdownMenuContent></DropdownMenu>
-                                <Context usedTokens={Math.min(contextUsage?.tokens ?? 0, contextUsage?.contextWindow ?? contextWindow())} maxTokens={contextUsage?.contextWindow || contextWindow()}><div className="context-usage"><ContextTrigger aria-label="Context window usage" title="Estimated tokens used in the active pi context window" className="context-trigger"/></div><ContextContent side="top" align="end"><ContextContentHeader/><ContextContentBody><span className="context-detail-label">Estimated tokens in the active pi context window</span></ContextContentBody></ContextContent></Context>
-                                {running && <Select items={[{value:'steer',label:'Steer now'},{value:'waitlist',label:'Add to waitlist'}]} value={delivery} onValueChange={value => value && setDelivery(value as 'steer' | 'waitlist')}><SelectTrigger aria-label="Message delivery" size="sm" className="composer-permission-trigger"><SelectValue/></SelectTrigger><SelectContent><SelectGroup><SelectItem value="steer">Steer now</SelectItem><SelectItem value="waitlist"><ListPlus/>Add to waitlist</SelectItem></SelectGroup></SelectContent></Select>}
+                                <Context usedTokens={Math.min(contextUsage?.tokens ?? 0, contextUsage?.contextWindow ?? contextWindow())} maxTokens={contextUsage?.contextWindow || contextWindow()}><div className="context-usage"><ContextTrigger aria-label="Context window usage" title="Estimated tokens used in the active pi context window" className="context-trigger"/></div><ContextContent side="top" align="end" className="context-usage-popover"><ContextContentHeader/><ContextContentBody><span className="context-detail-label">Estimated tokens in the active pi context window</span></ContextContentBody></ContextContent></Context>
                                 {!running && run.status === 'stopped' && messages.some(message => message.role === 'user') && <Button size="sm" variant="outline" onClick={() => submitMessage({text:'Continue from where you stopped. Review the current conversation and continue the unfinished work.'})}>Continue</Button>}
                                 {running && <Button type="button" size="icon-sm" variant="outline" aria-label="Stop run" title="Stop run" onClick={() => action(() => agentAPI().stop(activeChatId))}><Stop/></Button>}
                                 <PromptInputSubmit disabled={!running && !models.length} status="ready"><ArrowUpRight/></PromptInputSubmit>

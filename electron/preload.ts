@@ -1,5 +1,18 @@
 import { ipcRenderer, contextBridge } from 'electron'
 import type {AgentAPI, AgentEvent} from '../shared/agent'
+import type {MenuAPI, MenuCommand} from '../shared/menu'
+
+if (process.platform === 'darwin') {
+  const menuAPI: MenuAPI = {
+    subscribe: listener => {
+      const handler = (_event: Electron.IpcRendererEvent, command: MenuCommand) => listener(command)
+      ipcRenderer.on('app-menu:command', handler)
+      ipcRenderer.send('app-menu:ready')
+      return () => ipcRenderer.removeListener('app-menu:command', handler)
+    },
+  }
+  contextBridge.exposeInMainWorld('menuAPI', menuAPI)
+}
 
 // --------- Expose some API to the Renderer process ---------
 contextBridge.exposeInMainWorld('ipcRenderer', {
@@ -37,7 +50,8 @@ const agentAPI: AgentAPI = {
   start: request => ipcRenderer.invoke('agent:start', request),
   stop: chatId => ipcRenderer.invoke('agent:stop', chatId),
   approve: (id, approved) => ipcRenderer.invoke('agent:approve', id, approved),
-  enqueue: (chatId, text, delivery) => ipcRenderer.invoke('agent:enqueue', chatId, text, delivery),
+  enqueue: (chatId, text) => ipcRenderer.invoke('agent:enqueue', chatId, text),
+  updateQueue: (chatId, id, action) => ipcRenderer.invoke('agent:update-queue', chatId, id, action),
   workspace: cwd => ipcRenderer.invoke('agent:workspace', cwd),
   saveMemory: (cwd, text) => ipcRenderer.invoke('agent:save-memory', cwd, text),
   restore: (cwd, id) => ipcRenderer.invoke('agent:restore', cwd, id),

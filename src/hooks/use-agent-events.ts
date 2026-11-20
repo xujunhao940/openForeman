@@ -1,12 +1,12 @@
 import {useEffect, useRef, useSyncExternalStore} from 'react'
-import type {AgentEvent, PermissionRequest, SubagentState, ToolTrace, WorkspaceState} from '../../shared/agent'
+import type {AgentEvent, QueuedPrompt, PermissionRequest, SubagentState, ToolTrace, WorkspaceState} from '../../shared/agent'
 
 export type RunState = {
     status: 'idle' | 'starting' | 'running' | 'done' | 'error' | 'stopped'
     error?: string; tools: ToolTrace[]; agents: SubagentState[]; permissions: PermissionRequest[]; steps: string[]
-    workspace?: WorkspaceState
+    queue: QueuedPrompt[]; workspace?: WorkspaceState
 }
-const empty: RunState = {status: 'idle', tools: [], agents: [], permissions: [], steps: []}
+const empty: RunState = {status: 'idle', queue: [], tools: [], agents: [], permissions: [], steps: []}
 const states = new Map<string, RunState>()
 const listeners = new Set<() => void>()
 let subscribed = false
@@ -23,6 +23,7 @@ function ensureSubscription() {
         if (event.type === 'subagent') next = {...prior, agents: [...prior.agents.filter(agent => agent.id !== event.agent.id), event.agent]}
         if (event.type === 'permission') next = {...prior, permissions: [...prior.permissions, event.request]}
         if (event.type === 'permission-resolved') next = {...prior, permissions: prior.permissions.filter(request => request.id !== event.id)}
+        if (event.type === 'queue') next = {...prior, queue: event.items}
         if (event.type === 'plan') next = {...prior, steps: event.steps}
         if (event.type === 'workspace') next = {...prior, workspace: event.workspace}
         if (next !== prior) { states.set(event.chatId, next); listeners.forEach(listener => listener()) }

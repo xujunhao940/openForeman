@@ -19,7 +19,7 @@
 .settings-navigation-heading {
     padding: 16px;
     font-size: 12px;
-    font-weight: 600;
+    font-weight: 500;
 }
 
 .settings-category-list {
@@ -77,14 +77,14 @@
     margin: 0 0 8px;
     color: var(--muted-foreground);
     font-size: 9px;
-    font-weight: 600;
+    font-weight: 500;
     letter-spacing: 0.12em;
 }
 
 .settings-detail-header h1 {
     margin: 0;
-    font-family: "Instrument Serif", "Noto Serif SC", serif;
-    font-size: 30px;
+    font-family: var(--heading-face);
+    font-size: 18px;
     font-weight: 400;
     line-height: 1.1;
 }
@@ -184,7 +184,7 @@
 .provider-setting-heading h2 {
     margin: 0;
     font-size: 13px;
-    font-weight: 600;
+    font-weight: 500;
 }
 
 .provider-setting-heading span,
@@ -400,9 +400,9 @@
 
 .permissions-settings { gap: 24px; padding-top: 20px; }
 .permissions-descriptions { display: flex; flex-direction: column; gap: 20px; font-size: 12px; }
-.permissions-descriptions dt { font-weight: 600; margin-bottom: 6px; }
+.permissions-descriptions dt { font-weight: 500; margin-bottom: 6px; }
 .permissions-descriptions dd { color: var(--muted-foreground); line-height: 1.6; }
 .plugins-header { flex-wrap: wrap; }
 .plugins-header > div { flex: 1; min-width: 180px; }
-.plugins-header h2 { font-size: 14px; font-weight: 600; }
+.plugins-header h2 { font-size: 14px; font-weight: 500; }
 .plugins-settings .plugins-header .settings-section-intro { padding-block: 8px 0; }

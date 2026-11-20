@@ -1,8 +1,11 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, screen } from 'electron'
+import { mkdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import {registerProviderHandlers} from './providers'
 import {registerAgentHandlers} from './agent/ipc'
+import {installMacMenu, macAppName} from './menu'
+import type {MenuCommand} from '../shared/menu'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -22,13 +25,26 @@ export const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
 export const MAIN_DIST = path.join(process.env.APP_ROOT, 'dist-electron')
 export const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
 
-process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : RENDERER_DIST
+const iconDirectory = path.join(process.env.APP_ROOT, 'icons')
+const appIcon = path.join(iconDirectory, 'Foreman.png')
 
-let win: BrowserWindow | null
+if (process.platform === 'darwin') {
+  // Keep existing projects, credentials and browser storage under the original profile.
+  const userData = app.getPath('userData')
+  mkdirSync(userData, {recursive: true})
+  app.setPath('userData', userData)
+  app.setName(macAppName)
+}
+
+let win: BrowserWindow | null = null
+let menuReady: Promise<boolean>
 
 function createWindow() {
+  const { width, height } = screen.getPrimaryDisplay().workAreaSize
   win = new BrowserWindow({
-    icon: path.join(process.env.VITE_PUBLIC, 'electron-vite.svg'),
+    width: Math.min(850, width),
+    height: Math.min(650, height),
+    icon: appIcon,
     titleBarStyle: "hidden",
     trafficLightPosition: { x: 12, y: 12 },
     ...(process.platform !== 'darwin' ? { titleBarOverlay: true } : {}),
@@ -36,6 +52,17 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.mjs'),
     },
   })
+
+  const window = win
+  window.once('closed', () => {
+    win = null
+  })
+  if (process.platform === 'darwin') {
+    menuReady = new Promise(resolve => {
+      window.webContents.ipc.once('app-menu:ready', () => resolve(true))
+      window.once('closed', () => resolve(false))
+    })
+  }
 
   // Test active push message to Renderer-process.
   win.webContents.on('did-finish-load', () => {
@@ -48,6 +75,16 @@ function createWindow() {
     // win.loadFile('dist/index.html')
     win.loadFile(path.join(RENDERER_DIST, 'index.html'))
   }
+  return window
+}
+
+async function dispatchMenuCommand(command: MenuCommand) {
+  const window = win ?? createWindow()
+  if (window.isMinimized()) window.restore()
+  window.show()
+  if (await menuReady && !window.isDestroyed()) {
+    window.webContents.send('app-menu:command', command)
+  }
 }
 
 // Quit when all windows are closed, except on macOS. There, it's common
@@ -56,7 +93,6 @@ function createWindow() {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
-    win = null
   }
 })
 
@@ -69,6 +105,12 @@ app.on('activate', () => {
 })
 
 app.whenReady().then(() => {
+  if (process.platform === 'darwin') {
+    if (!app.isPackaged) {
+      app.dock.setIcon(path.join(iconDirectory, 'Foreman-mac.png'))
+    }
+    installMacMenu(iconDirectory, dispatchMenuCommand)
+  }
   registerProviderHandlers()
   registerAgentHandlers()
   createWindow()

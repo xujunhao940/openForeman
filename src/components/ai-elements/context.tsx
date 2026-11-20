@@ -1,11 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from "@/components/ui/hover-card";
+import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import type { ComponentProps } from "react";
@@ -44,7 +40,7 @@ const useContextValue = () => {
   return context;
 };
 
-export type ContextProps = ComponentProps<typeof HoverCard> & ContextSchema;
+export type ContextProps = ComponentProps<typeof PopoverPrimitive.Root> & ContextSchema;
 
 export const Context = ({
   usedTokens,
@@ -60,7 +56,7 @@ export const Context = ({
 
   return (
     <ContextContext.Provider value={contextValue}>
-      <HoverCard {...props} />
+      <PopoverPrimitive.Root {...props} />
     </ContextContext.Provider>
   );
 };
@@ -109,28 +105,43 @@ const ContextIcon = () => {
 export type ContextTriggerProps = ComponentProps<typeof Button>;
 
 export const ContextTrigger = ({ children, ...props }: ContextTriggerProps) => {
-
   return (
-    <HoverCardTrigger>
-      {children ?? (
-        <Button type="button" variant="ghost" {...props}>
-          <ContextIcon />
-        </Button>
-      )}
-    </HoverCardTrigger>
+    <PopoverPrimitive.Trigger
+      render={<Button type="button" variant="ghost" {...props} />}
+    >
+      {children ?? <ContextIcon />}
+    </PopoverPrimitive.Trigger>
   );
 };
 
-export type ContextContentProps = ComponentProps<typeof HoverCardContent>;
+export type ContextContentProps = PopoverPrimitive.Popup.Props &
+  Pick<PopoverPrimitive.Positioner.Props, "side" | "sideOffset" | "align" | "alignOffset">;
 
 export const ContextContent = ({
   className,
+  side = "bottom",
+  sideOffset = 4,
+  align = "center",
+  alignOffset = 0,
   ...props
 }: ContextContentProps) => (
-  <HoverCardContent
-    className={cn("min-w-60 divide-y overflow-hidden p-0", className)}
-    {...props}
-  />
+  <PopoverPrimitive.Portal>
+    <PopoverPrimitive.Positioner
+      side={side}
+      sideOffset={sideOffset}
+      align={align}
+      alignOffset={alignOffset}
+      className="z-50 outline-none"
+    >
+      <PopoverPrimitive.Popup
+        className={cn(
+          "z-50 min-w-60 divide-y overflow-hidden rounded-2xl border border-border bg-popover p-0 text-popover-foreground shadow-lg outline-none",
+          className
+        )}
+        {...props}
+      />
+    </PopoverPrimitive.Positioner>
+  </PopoverPrimitive.Portal>
 );
 
 export type ContextContentHeaderProps = ComponentProps<"div">;

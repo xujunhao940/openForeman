@@ -9,15 +9,24 @@
   },
   "files": [
     "dist",
-    "dist-electron"
+    "dist-electron",
+    "icons/Foreman.png"
   ],
   "mac": {
+    "icon": "icons/Foreman-mac.icns",
+    "extendInfo": {
+      "CFBundleDisplayName": "Open Foreman"
+    },
+    "files": [
+      "icons/Foreman-mac.png"
+    ],
     "target": [
       "dmg"
     ],
     "artifactName": "${productName}-Mac-${version}-Installer.${ext}"
   },
   "win": {
+    "icon": "icons/Foreman.ico",
     "target": [
       {
         "target": "nsis",
@@ -29,12 +38,14 @@
     "artifactName": "${productName}-Windows-${version}-Setup.${ext}"
   },
   "nsis": {
+    "uninstallerIcon": "icons/Foreman.ico",
     "oneClick": false,
     "perMachine": false,
     "allowToChangeInstallationDirectory": true,
     "deleteAppDataOnUninstall": false
   },
   "linux": {
+    "icon": "icons/Foreman.png",
     "target": [
       "AppImage"
     ],

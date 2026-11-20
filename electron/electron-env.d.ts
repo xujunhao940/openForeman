@@ -16,14 +16,13 @@ declare namespace NodeJS {
      * ```
      */
     APP_ROOT: string
-    /** /dist/ or /public/ */
-    VITE_PUBLIC: string
   }
 }
 
 // Used in Renderer process, expose in `preload.ts`
 interface Window {
   agentAPI?: import('../shared/agent').AgentAPI
+  menuAPI?: import('../shared/menu').MenuAPI
   ipcRenderer: import('electron').IpcRenderer
   providersAPI?: {
     readKey: (id: string) => Promise<string>

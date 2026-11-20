@@ -153,6 +153,7 @@ test('pi runtime streams actual SDK events, gates writes, persists sessions, and
                 for (let i = 0; i < 120; i++) chunk({content: 'a'})
                 chunk({}, 'stop')
             } else { chunk({content: 'Verified pi response'}); chunk({}, 'stop') }
+            res.write(`data: ${JSON.stringify({choices: [], usage: {prompt_tokens: 10, completion_tokens: 3, total_tokens: 13}})}\n\n`)
             res.end('data: [DONE]\n\n')
         } catch (error) { res.writeHead(500); res.end(String(error)) }
     })
@@ -168,6 +169,17 @@ test('pi runtime streams actual SDK events, gates writes, persists sessions, and
         if (event.type === 'permission') {
             // The tool must still be waiting when the UI receives the request.
             if (event.request.tool === 'write') assert.equal(events.some(item => item.type === 'tool' && item.tool.name === 'write' && item.tool.state === 'done'), false)
+            if (event.chatId === 'queue-test') {
+                for (const text of ['one', 'two', 'three']) runtime.enqueue(event.chatId, text)
+                const queue = events.findLast(e => e.type === 'queue')
+                assert.ok(queue?.type === 'queue')
+                const [, second, third] = queue.items
+                runtime.updateQueue(event.chatId, second.id, {kind: 'up'})
+                runtime.updateQueue(event.chatId, second.id, {kind: 'edit', text: 'edited second'})
+                runtime.updateQueue(event.chatId, third.id, {kind: 'steer'})
+                setTimeout(() => runtime.approve(event.request.id, approve), 120)
+                return
+            }
             runtime.approve(event.request.id, approve)
         }
     }, async () => 'test-key')
@@ -220,6 +232,13 @@ test('pi runtime streams actual SDK events, gates writes, persists sessions, and
         assert.ok(stable?.type === 'workspace')
         assert.deepEqual(stable.workspace.checkpoints, state.checkpoints, 'chat does not snapshot independent edits')
         await rm(path.join(cwd, 'outside-change.txt'))
+        const requestCount = requests.length
+        const queued = await run(request('queue-test', 'WRITE'))
+        assert.deepEqual(queued.flatMap(event => event.type === 'message' && event.message.role === 'user' ? [event.message.text] : []), ['three', 'edited second', 'one'])
+        const summary = queued.find(event => event.type === 'message' && event.message.runSummary)
+        assert.ok(summary?.type === 'message')
+        assert.ok(summary.message.durationMs! >= 120, 'elapsed time includes the permission wait')
+        assert.equal(summary.message.usage?.total, 13 * (requests.length - requestCount))
         const noop = await run({...request('chat-noop', 'WRITE'), permissionMode: 'auto'})
         assert.ok(!noop.some(event => event.type === 'message' && event.message.changes), 'identical writes have no undo footer')
         assert.ok(!noop.some(event => event.type === 'permission'), 'per-run auto mode bypasses approval')
