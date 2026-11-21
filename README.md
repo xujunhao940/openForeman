@@ -1,62 +1,82 @@
-# Open Foreman
+<div align="center">
+  <img src="icons/Foreman.png" width="128" alt="Open Foreman logo" />
+  <h1>Open Foreman</h1>
+  <p><strong>A desktop UI for the pi coding agent.</strong></p>
+  <p>Bring pi's real conversations and tool execution into a workspace for managing projects, configuring models, controlling permissions, and reviewing code changes.</p>
+  <p>
+    <a href="README.zh-CN.md">简体中文</a>
+  </p>
+  <p>
+    <a href="https://github.com/xujunhao940/openForeman/stargazers"><img src="https://img.shields.io/github/stars/xujunhao940/openForeman?style=for-the-badge&logo=github" alt="GitHub stars" /></a>
+    <a href="https://github.com/xujunhao940/openForeman/network/members"><img src="https://img.shields.io/github/forks/xujunhao940/openForeman?style=for-the-badge&logo=github" alt="GitHub forks" /></a>
+    <a href="https://github.com/xujunhao940/openForeman/issues"><img src="https://img.shields.io/github/issues/xujunhao940/openForeman?style=for-the-badge&logo=github" alt="GitHub issues" /></a>
+  </p>
+  <p>
+    <img src="https://img.shields.io/badge/pi-coding%20agent-c9952e?style=for-the-badge" alt="pi coding agent" />
+    <img src="https://img.shields.io/badge/Electron-desktop-47848f?style=for-the-badge&logo=electron&logoColor=white" alt="Electron" />
+    <img src="https://img.shields.io/badge/TypeScript-app-3178c6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
+  </p>
+</div>
 
-An Electron workspace for coding agents, built with React, shadcn/ui and AI Elements. The desktop agent runtime uses the official **pi coding agent SDK**; conversations and tool execution are real SDK sessions, not simulated replies.
+## Getting started
 
-## Run
-
-Requires Node.js 22.19+ and Yarn 4.5.3.
+**Requirements:** Node.js 22.19+ and Yarn 4.5.3.
 
 ```sh
 yarn install
 yarn dev
 ```
 
-1. Add a project using an absolute directory path (or **Choose folder**).
-2. Open **Settings → Providers**, add an OpenAI-compatible provider, save its API key and fetch models.
-3. Enable a model in **Settings → Models**. Select it in the chat composer.
-4. Choose **Build**, **Plan** or **Review**, then send a message. Approve requested actions in the conversation.
+1. Add a project with an absolute directory path, or choose a folder.
+2. In **Settings → Providers**, add an OpenAI-compatible provider, save its API key, and fetch models.
+3. Enable a model in **Settings → Models**, then select it in the chat composer.
+4. Choose **Build**, **Plan**, or **Review**, send a message, and approve requested actions in the conversation.
 
-Providers currently use the OpenAI Chat Completions protocol, including custom base URLs and local keyless endpoints. API keys remain in Electron's system-encrypted credential store and are passed to pi through in-memory auth overrides. They are not sent through the agent IPC or written to pi auth files. Reasoning is off by default for compatibility; select a level only for models that support it. Context/output limits currently use conservative defaults of 128k/16k tokens rather than provider metadata.
+Providers use the OpenAI Chat Completions protocol, including custom base URLs and local keyless endpoints. API keys are stored in Electron's system-encrypted credential store and passed to pi through in-memory auth overrides. They are not sent through agent IPC or written to pi auth files. Reasoning is off by default for compatibility. Context and output limits use conservative defaults of 128k and 16k tokens rather than provider metadata.
 
-The browser preview renders the UI and can preview plugin settings. File access and agents require Electron. Preview settings are separate from desktop runtime configuration.
+The browser preview renders the UI and can preview plugin settings. File access and agent execution require Electron. Preview settings are separate from desktop runtime configuration.
 
-## Bundled plugins
+## Capabilities
 
-All ten capabilities ship as application code and remain part of the pi runtime. **Plugins** only lists global Skills and MCP servers. Set default permissions in **Settings → Permissions**, or override the current conversation inside the prompt input. Configuration changes take effect on the next run and are blocked while any run is active.
+All ten capabilities below ship as application code and remain part of the pi runtime. The **Plugins** page lists global Skills and MCP servers. Set default permissions in **Settings → Permissions**, or override permissions for the current conversation in the prompt input. Configuration changes take effect on the next run and are blocked while a run is active.
 
-**Project details** opens from the project row in the sidebar and expands the animated project panel. It contains the project name, available models, memories, checkpoints and discovered skills. Project skills are enabled automatically. Add a global skill folder in **Plugins → Add global skill** to make it available across projects; global skills can be disabled or removed without deleting their source files. Reasoning effort uses a stepped slider alongside the model selector in one composer menu. The composer reports the active session context-window estimate (token usage when provided by the model, with a message-length fallback).
+Project details open from a project row in the sidebar. The panel includes the project name, available models, memories, checkpoints, and discovered skills. Project skills are enabled automatically. Add a global skill folder through **Plugins → Add global skill** to use it across projects. Global skills can be disabled or removed without deleting their source files. Reasoning effort is selected with a stepped slider beside the model selector in the composer menu. The composer reports the active session's context-window estimate, using model token usage when available and message length as a fallback.
 
-| Plugin | Behavior |
+| Capability | What it does |
 | --- | --- |
-| Subagents | In all modes the main agent handles single tasks itself. Delegation requires at least two independent read-only assignments with different deliverables, launched in parallel. Foreman Mode scales the concurrency limit with reasoning effort. Children cannot delegate. |
-| Plan mode | `update_plan` publishes ordered steps. Plan mode blocks file writes, shell commands, memory writes and MCP operations before execution. |
-| Permissions | Ask, Approve for me, Read only and Allow all modes. Ask requires per-call approval for writes, shell, web and MCP. Approve for me uses the selected model to review actions and asks you if review does not approve. Approval expires after five minutes and is cancelled when the run stops. Disabling the plugin blocks sensitive tools. |
-| Checkpoints | File snapshots before and after each run, persisted outside the project; unchanged snapshots are reused. Git repositories use tracked and non-ignored files; other folders exclude build and dependency directories. |
-| Memory | Explicit per-project notes, editable in the UI and through a permission-gated `memory` tool; injected into subsequent sessions. |
-| Web access | `web_fetch` retrieves public HTTP(S) text/HTML/JSON. DNS is checked and pinned, redirects are revalidated, with a 30-second timeout and 1 MiB response limit. It does not provide search-engine results or browser automation. |
-| MCP | Tool discovery/calls over stdio and Streamable HTTP. Configure servers in Plugins; connections and calls require permission. Treated as mutating, so unavailable in Plan/Review and Read only. |
-| Undo / redo | Restore file changes between checkpoints. All affected paths are checked for conflicts before writes; unrelated files are preserved. Appears at the end of an assistant response only when workspace files actually changed; each response targets its own before/after snapshots. Requires Checkpoints. This restores workspace files, not model conversation history. |
-| Review | A file browser shows staged/unstaged changes against HEAD and untracked file content, with per-file counts, line numbers and colored additions/deletions. Review with agent starts a read-only inspection. |
-| Skills | pi discovers project `.pi/skills`, `.agents/skills` and explicitly registered global skill folders. Skills appear in the UI and pi system prompt; `/skill:name` invokes discovered instructions. Arbitrary project extension code is not auto-loaded. |
+| Subagents | The main agent handles single tasks in every mode. Delegation requires at least two independent, read-only assignments with different deliverables, launched in parallel. Foreman Mode scales concurrency with reasoning effort. Children cannot delegate. |
+| Plan mode | `update_plan` publishes ordered steps. Plan mode blocks file writes, shell commands, memory writes, and MCP operations before execution. |
+| Permissions | Ask, Approve for me, Read only, and Allow all modes. Ask requires per-call approval for writes, shell, web, and MCP. Approve for me uses the selected model to review actions and asks the user when review does not approve. Approval expires after five minutes and is cancelled when a run stops. Disabling the capability blocks sensitive tools. |
+| Checkpoints | File snapshots are saved before and after each run, outside the project. Unchanged snapshots are reused. Git repositories include tracked and non-ignored files; other folders exclude build and dependency directories. |
+| Memory | Explicit per-project notes can be edited in the UI or through the permission-gated `memory` tool. Notes are injected into subsequent sessions. |
+| Web access | `web_fetch` retrieves public HTTP(S) text, HTML, or JSON. DNS is checked and pinned, redirects are revalidated, and requests have a 30-second timeout and 1 MiB response limit. It does not provide search-engine results or browser automation. |
+| MCP | Discovers and calls tools over stdio and Streamable HTTP. Configure servers in Plugins. Connections and calls require permission and are treated as mutating, so they are unavailable in Plan, Review, and Read only modes. |
+| Undo and redo | Restores workspace files between checkpoints after checking all affected paths for conflicts. Unrelated files are preserved. Controls appear at the end of an assistant response only when workspace files changed, and each response targets its own before and after snapshots. Requires Checkpoints and does not restore model conversation history. |
+| Review | A file browser shows staged and unstaged changes against HEAD, untracked file content, per-file counts, line numbers, and colored additions and deletions. Review with agent starts a read-only inspection. |
+| Skills | pi discovers project `.pi/skills`, `.agents/skills`, and explicitly registered global skill folders. Skills appear in the UI and pi system prompt. `/skill:name` invokes discovered instructions. Arbitrary project extension code is not loaded automatically. |
 
-The shell is an approved local shell, not an OS sandbox. File tools validate project paths and symlinks; approving a shell or MCP server can grant access outside the workspace. Read only blocks all such operations. External network effects, shell changes outside the project and MCP effects cannot be undone by file checkpoints.
+## Security and limits
 
-Checkpoints stop rather than silently omit unsupported files: maximum 4,000 files, 8 MiB per file and approximately 36 MiB total. Symlinks/non-regular files are rejected. Ignore large generated artifacts before using an agent. Snapshot files may contain source-code secrets and are stored with owner-only permissions. There is currently no automatic checkpoint retention cleanup.
+The shell is an approved local shell, not an OS sandbox. File tools validate project paths and symlinks. Approving a shell or MCP server can grant access outside the workspace. Read only blocks these operations. External network effects, shell changes outside the project, and MCP effects cannot be undone by file checkpoints.
 
-One conversation can run per project directory at a time, preventing overlapping writes/restores. Other projects can run independently. Stop cancels the root session, children and pending approvals. pi JSONL history resumes by project/chat after restart; the renderer keeps visible messages in localStorage.
+Checkpoints stop if they encounter unsupported files rather than silently omitting them. Limits are 4,000 files, 8 MiB per file, and approximately 36 MiB total. Symlinks and non-regular files are rejected. Exclude large generated artifacts before using an agent. Snapshots may contain source-code secrets and are stored with owner-only permissions. Automatic checkpoint retention cleanup is not currently available.
+
+Only one conversation can run per project directory at a time, preventing overlapping writes and restores. Other projects can run independently. Stop cancels the root session, children, and pending approvals. pi JSONL history resumes by project and chat after restart. The renderer stores visible messages in localStorage.
 
 ## Architecture
 
-- `electron/agent/runtime.ts`: pi lifecycle, streaming, bundled tools and session persistence.
-- `electron/agent/permissions.ts`: execution gate and pending approvals.
-- `electron/agent/storage.ts`: project paths, atomic state, checkpoint restore/conflicts and review diff.
-- `electron/agent/mcp.ts`, `web.ts`: bounded MCP and web adapters.
-- `shared/agent.ts`: typed IPC contract and bundled plugin manifest.
-- `electron/agent/ipc.ts`, `electron/preload.ts`: Electron bridge.
-- `src/hooks/use-agent-events.ts`: shared event store that survives chat navigation.
-- `src/pages/project.tsx`: live AI Elements conversation, plan, reasoning, approvals, per-response file diffs and context usage.
+| File | Responsibility |
+| --- | --- |
+| `electron/agent/runtime.ts` | pi lifecycle, streaming, bundled tools, and session persistence |
+| `electron/agent/permissions.ts` | Execution gate and pending approvals |
+| `electron/agent/storage.ts` | Project paths, atomic state, checkpoint restore and conflicts, and review diff |
+| `electron/agent/mcp.ts`, `web.ts` | MCP and web adapters |
+| `shared/agent.ts` | Typed IPC contract and bundled capability manifest |
+| `electron/agent/ipc.ts`, `electron/preload.ts` | Electron bridge |
+| `src/hooks/use-agent-events.ts` | Shared event store that survives chat navigation |
+| `src/pages/project.tsx` | Conversation UI, plans, reasoning, approvals, per-response file diffs, and context usage |
 
-Runtime configuration, workspace memory, checkpoints and pi sessions live under Electron `userData/agent/`. No credentials belong in project memory or MCP command arguments.
+Runtime configuration, workspace memory, checkpoints, and pi sessions live under Electron `userData/agent/`. Credentials should not be stored in project memory or MCP command arguments.
 
 ## Verify and package
 
@@ -64,11 +84,11 @@ Runtime configuration, workspace memory, checkpoints and pi sessions live under 
 yarn typecheck
 yarn test
 yarn lint
-yarn build:app             # Renderer + Electron bundles
-yarn package:dir           # Unpacked desktop app using the installed Electron
+yarn build:app             # Renderer and Electron bundles
+yarn package:dir           # Unpacked app using the installed Electron
 yarn build                 # Platform installer
 ```
 
-`tests/agent.test.ts` runs the real pi SDK against a local SSE model fixture and a real MCP stdio fixture. It covers streaming/tool execution, permissions, read-only enforcement, persistent history/memory, subagents, plugin toggles, file restore conflicts and review. Tests need localhost and subprocess access; they do not call a paid model.
+`tests/agent.test.ts` runs the real pi SDK against a local SSE model fixture and a real MCP stdio fixture. It covers streaming and tool execution, permissions, read-only enforcement, persistent history and memory, subagents, capability toggles, file restore conflicts, and review. Tests require localhost and subprocess access and do not call a paid model.
 
-pi/MCP remain external production dependencies in the Electron bundle so their native modules, package resources and dynamic imports are included correctly by electron-builder. AI Elements are registry-installed source components adapted to the existing Base UI primitives and Gravity icons.
+pi and MCP remain external production dependencies in the Electron bundle so electron-builder includes their native modules, package resources, and dynamic imports. AI Elements are registry-installed source components adapted to the existing Base UI primitives and Gravity icons.
