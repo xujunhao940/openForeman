@@ -48,6 +48,17 @@ export async function safeProjectFile(cwd: string, input: string) {
     return target
 }
 const excluded = new Set(['.git', 'node_modules', '.yarn', 'dist', 'dist-electron', 'release', '.DS_Store'])
+async function mapConcurrent<T, R>(items: T[], limit: number, map: (item: T) => Promise<R>): Promise<R[]> {
+    const results = new Array<R>(items.length)
+    let next = 0
+    await Promise.all(Array.from({length: Math.min(limit, items.length)}, async () => {
+        while (next < items.length) {
+            const index = next++
+            results[index] = await map(items[index])
+        }
+    }))
+    return results
+}
 async function walk(cwd: string, prefix = ''): Promise<string[]> {
     const entries = await readdir(path.join(cwd, prefix), {withFileTypes: true})
     const files: string[] = []
@@ -95,8 +106,10 @@ export class CheckpointStore {
         if (names.length > 4000) throw new Error('Checkpoint limit: 4,000 files.')
         const files: Snapshot['files'] = {}
         let size = 0
-        for (const name of names) {
-            const value = await this.version(name)
+        const versions = await mapConcurrent(names, 16, name => this.version(name))
+        for (let index = 0; index < names.length; index++) {
+            const name = names[index]
+            const value = versions[index]
             if (value) { files[name] = value; size += value.content.length }
             if (size > 48 * 1024 * 1024) throw new Error('Checkpoint exceeds 36 MiB. Ignore large generated files first.')
         }
@@ -182,12 +195,14 @@ export async function workspaceReview(cwd: string): Promise<ReviewFile[]> {
     })
     const files: ReviewFile[] = []
     if (tracked.length + untracked.split('\0').filter(Boolean).length > 200) throw new Error('More than 200 changed files. Narrow the changes before reviewing.')
-    for (const file of tracked) {
+    const reviewed = await mapConcurrent(tracked, 16, async file => {
         const target = await safeProjectFile(cwd, file.path)
         const exists = await lstat(target).then(() => true, () => false)
         const {stdout: patch} = await exec('git', ['diff', base, '--no-ext-diff', '--no-color', '--no-renames', '--', file.path], options)
-        files.push({...file, status: !exists ? 'deleted' : patch.includes('new file mode') ? 'added' : 'modified', patch: patch.slice(0, 160000), truncated: patch.length > 160000})
-    }
+        return {...file, status: !exists ? 'deleted' as const : patch.includes('new file mode') ? 'added' as const : 'modified' as const,
+            patch: patch.slice(0, 160000), truncated: patch.length > 160000}
+    })
+    files.push(...reviewed)
     for (const file of untracked.split('\0').filter(Boolean)) {
         const target = await safeProjectFile(cwd, file)
         const stat = await lstat(target)

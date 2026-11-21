@@ -10,7 +10,7 @@ import {StreamableHTTPServerTransport} from '@modelcontextprotocol/sdk/server/st
 import {execFileSync} from 'node:child_process'
 import {CheckpointStore, workspaceDir, safeProjectFile, workspaceDiff, workspaceReview} from '../electron/agent/storage'
 import {PermissionGate} from '../electron/agent/permissions'
-import {AgentRuntime, foremanModeSubagentLimit} from '../electron/agent/runtime'
+import {AgentRuntime, foremanModeSubagentLimit, type RunOptions} from '../electron/agent/runtime'
 import {connectMcp} from '../electron/agent/mcp'
 import {fetchPublicPage} from '../electron/agent/web'
 import {defaultAgentConfig, type AgentConfig, type AgentEvent, type RunRequest} from '../shared/agent'
@@ -126,9 +126,11 @@ test('pi runtime streams actual SDK events, gates writes, persists sessions, and
             const text = JSON.stringify(messages[lastUser]?.content)
             const reviewingAction = messages.some((message: {role: string; content: unknown}) => message.role === 'system' && JSON.stringify(message.content).includes('You review proposed tool actions'))
             const alreadyCalled = messages.slice(lastUser + 1).some((message: {role: string}) => message.role === 'tool')
+            const foremanMode = messages.some((message: {role: string; content: unknown}) => message.role === 'system' && JSON.stringify(message.content).includes('Foreman Mode is enabled'))
             const write = /WRITE/.test(text)
             const plan = /PLAN/.test(text)
             const delegate = /DELEGATE/.test(text)
+            const delegateNow = delegate || (foremanMode && !alreadyCalled)
             const readGlobal = /READ_GLOBAL/.test(text)
             const childResearch = questions.some(question => text.includes(question))
             if (childResearch && !alreadyCalled && arrivals < 2) {
@@ -138,7 +140,7 @@ test('pi runtime streams actual SDK events, gates writes, persists sessions, and
             const tool = childResearch ? {name: 'read', arguments: JSON.stringify({path: 'README.md'})}
                 : write ? {name: 'write', arguments: JSON.stringify({path: 'output.txt', content: 'from pi'})}
                 : plan ? {name: 'update_plan', arguments: JSON.stringify({steps: ['Inspect project', 'Implement change']})}
-                : delegate ? {name: 'subagent', arguments: JSON.stringify(text.includes('SOLO') ? {task: questions[0]} : {tasks: text.includes('SINGLE') ? questions.slice(0, 1) : text.includes('DUPLICATE') ? [questions[0], questions[0]] : questions})}
+                : delegateNow ? {name: 'subagent', arguments: JSON.stringify(text.includes('SOLO') ? {task: questions[0]} : {tasks: text.includes('SINGLE') ? questions.slice(0, 1) : text.includes('DUPLICATE') ? [questions[0], questions[0]] : questions})}
                 : readGlobal ? {name: 'read', arguments: JSON.stringify({path: path.join(root, 'global-skill', 'SKILL.md')})} : null
             res.writeHead(200, {'content-type': 'text/event-stream', 'cache-control': 'no-cache'})
             const chunk = (delta: unknown, finish_reason: string | null = null) => res.write(`data: ${JSON.stringify({id: 'chatcmpl-test', object: 'chat.completion.chunk', created: 1, model: 'mock-model', choices: [{index: 0, delta, finish_reason}]})}\n\n`)
@@ -186,9 +188,9 @@ test('pi runtime streams actual SDK events, gates writes, persists sessions, and
     const request = (chatId: string, text: string, mode: RunRequest['mode'] = 'build'): RunRequest => ({chatId, text, mode, projectPath: cwd,
         provider: {id: 'mock', name: 'Mock', preset: 'custom', baseUrl: `http://127.0.0.1:${address.port}/v1`, models: ['mock-model']},
         modelId: 'mock-model', effort: 'medium'})
-    async function run(input: RunRequest) {
+    async function run(input: RunRequest, options: RunOptions = {}) {
         events.length = 0
-        const {runId} = await runtime.start(input)
+        const {runId} = await runtime.start(input, options)
         await new Promise<void>((resolve, reject) => {
             const deadline = setTimeout(() => { clearInterval(timer); reject(new Error(`Run timeout: ${JSON.stringify(events)}`)) }, 15000)
             const timer = setInterval(() => {
@@ -300,8 +302,9 @@ test('pi runtime streams actual SDK events, gates writes, persists sessions, and
         const startRequests = requests.length
         const foreman = await run({...request('chat-foreman', 'Inspect the project'), foremanMode: true})
         console.log("Foreman fixture requests / JSON bytes", requests.length - startRequests, Buffer.byteLength(JSON.stringify(requests.slice(startRequests))))
-        assert.equal(requests.length - startRequests, 1, 'direct Foreman responses need only the main request')
-        assert.ok(!foreman.some(event => event.type === 'subagent'))
+        assert.equal(requests.length - startRequests, 6, 'Foreman starts two parallel subagents before the final main response')
+        assert.equal(foreman.filter(event => event.type === 'subagent' && event.agent.state === 'done').length, 2)
+        assert.match(JSON.stringify(requests.slice(startRequests)), /at least two useful, independent research tasks/)
         const globalDir = path.join(root, 'global-skill')
         await mkdir(globalDir)
         await writeFile(path.join(globalDir, 'SKILL.md'), '---\nname: readable-global\ndescription: Global reading fixture.\n---\nUse global conventions.\n')
@@ -319,6 +322,15 @@ test('pi runtime streams actual SDK events, gates writes, persists sessions, and
         await run(request('chat-plugins', 'Hello'))
         const tools = requests[requests.length - 1].tools as {function: {name: string}}[]
         assert.ok(!tools.some(tool => ['web_fetch', 'subagent'].includes(tool.function.name)))
+        const savedConfig = await runtime.config()
+        const isolatedConfig = config()
+        isolatedConfig.mcpServers = [{id: 'test', name: 'Test', enabled: true, transport: 'stdio', command: process.execPath,
+            args: [path.resolve('tests/fixtures/mcp-server.mjs')]}]
+        await run({...request('chat-mcp-only', 'Hello'), permissionMode: 'auto'}, {config: isolatedConfig, mcpOnly: true})
+        const isolatedRequest = requests.at(-1) as {tools: {function: {name: string}}[]; messages: unknown[]}
+        assert.deepEqual(isolatedRequest.tools.map(tool => tool.function.name).sort(), ['mcp_test_ping', 'update_plan'])
+        assert.doesNotMatch(JSON.stringify(isolatedRequest.messages), /fixture-skill|Project conventions persist/)
+        assert.deepEqual(await runtime.config(), savedConfig, 'MCP-only per-run config preserves saved settings')
         assert.equal((await runtime.workspace(cwd)).memory, 'Project conventions persist.')
         assert.ok((await runtime.workspace(cwd)).skills.some(skill => skill.name === 'fixture-skill'), 'project skills remain enabled')
     } finally { await runtime.dispose(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(root, {recursive: true, force: true}) }

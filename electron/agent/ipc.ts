@@ -2,6 +2,7 @@ import {app, BrowserWindow, dialog, ipcMain} from 'electron'
 import path from 'node:path'
 import {readKey} from '../providers'
 import {AgentRuntime} from './runtime'
+import {serveAgent} from './http'
 import type {AgentConfig, QueueAction, RunRequest} from '../../shared/agent'
 
 export function registerAgentHandlers() {
@@ -27,5 +28,14 @@ export function registerAgentHandlers() {
         return result.canceled ? null : result.filePaths[0]
     })
     app.on('before-quit', () => { void runtime.dispose() })
+    if (process.env.FOREMAN_API_PORT !== undefined) {
+        void serveAgent(runtime, Number(process.env.FOREMAN_API_PORT), process.env.FOREMAN_API_TOKEN ?? '').then(({server, port}) => {
+            console.info(`Foreman API listening on http://127.0.0.1:${port}`)
+            app.once('before-quit', () => server.close())
+        }).catch(error => {
+            console.error('Foreman API failed to start', error)
+            app.quit()
+        })
+    }
     return runtime
 }

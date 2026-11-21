@@ -48,7 +48,7 @@ type ProjectChat = { workspaceMode?: WorkspaceMode; id: string; name: string; me
 
 const PROJECTS_STORAGE_KEY = "foreman_projects"
 const CHATS_STORAGE_KEY = "foreman_project_chats"
-const defaultProjects: ProjectEntry[] = [{id: "foreman-model", name: "Foreman", path: "."}]
+const defaultProjects: ProjectEntry[] = []
 function summarizeChat(text: string) {
     const clean = text.replace(/\s+/g, ' ').trim()
     return clean.length > 32 ? `${clean.slice(0, 32)}…` : clean || 'New chat'
@@ -71,7 +71,7 @@ function readProjects(): ProjectEntry[] {
         const saved = window.localStorage.getItem(PROJECTS_STORAGE_KEY)
         if (!saved) return defaultProjects
         const projects = JSON.parse(saved) as ProjectEntry[]
-        return Array.isArray(projects) && projects.length > 0 ? projects : defaultProjects
+        return Array.isArray(projects) ? projects.filter(project => project.id !== 'foreman-model') : defaultProjects
     } catch {
         return defaultProjects
     }
@@ -84,17 +84,17 @@ export default function App() {
     const [activeChatIds, setActiveChatIds] = useState<Record<string, string>>({})
     const selectionKey = (projectId: string) => `${workspaceMode}:${projectId}`
     const inMode = (chat: ProjectChat) => (chat.workspaceMode ?? 'code') === workspaceMode
-    const [activeProjectId, setActiveProjectId] = useState(projects[0].id)
-    const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({[projects[0].id]: true})
+    const [activeProjectId, setActiveProjectId] = useState(projects[0]?.id ?? '')
+    const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>(() => projects[0] ? {[projects[0].id]: true} : {})
     const [dialogOpen, setDialogOpen] = useState(false)
     const [projectName, setProjectName] = useState("")
     const [projectPath, setProjectPath] = useState("")
     const [settingsOpen, setSettingsOpen] = useState(false)
     const [pluginsOpen, setPluginsOpen] = useState(false)
     const [detailsProjectId, setDetailsProjectId] = useState<string | null>(null)
-    const activeProject = projects.find((project) => project.id === activeProjectId) ?? projects[0]
-    const activeChats = (projectChats[activeProject.id] ?? []).filter(inMode)
-    const activeChatId = activeChatIds[selectionKey(activeProject.id)] ?? activeChats.find(chat => !chat.archived)?.id
+    const activeProject = projects.find((project) => project.id === activeProjectId)
+    const activeChats = activeProject ? (projectChats[activeProject.id] ?? []).filter(inMode) : []
+    const activeChatId = activeProject ? activeChatIds[selectionKey(activeProject.id)] ?? activeChats.find(chat => !chat.archived)?.id : undefined
     const titlebarPage = pluginsOpen ? 'Plugins' : settingsOpen ? 'Settings' : null
     const titlebarChat = activeChats.find(chat => chat.id === activeChatId)?.name ?? 'New chat'
 
@@ -129,7 +129,7 @@ export default function App() {
                 setDialogOpen(true)
                 break
             case 'new-chat':
-                openNewChat(activeProject.id)
+                if (activeProject) openNewChat(activeProject.id)
                 break
             case 'settings':
             case 'plugins':
@@ -378,13 +378,13 @@ export default function App() {
                     <SidebarTrigger aria-label="切换侧栏" className="h-9 w-9 shrink-0" />
                     <div className="titlebar-location">
                         {titlebarPage ? <span className="truncate">{titlebarPage}</span> : <>
-                            <span className="titlebar-project truncate">{activeProject.name}</span>
+                            <span className="titlebar-project truncate">{activeProject?.name ?? 'No project'}</span>
                             <span className="titlebar-separator" aria-hidden="true">/</span>
                             <span className="truncate">{titlebarChat}</span>
                         </>}
                     </div>
                 </header>
-                {pluginsOpen ? <Plugins /> : settingsOpen ? <Settings /> : <Project
+                {pluginsOpen ? <Plugins /> : settingsOpen ? <Settings /> : activeProject ? <Project
                     key={selectionKey(activeProject.id)}
                     workspaceMode={workspaceMode}
                     projectId={activeProject.id}
@@ -402,7 +402,11 @@ export default function App() {
                     activeChatId={activeChatId}
                     onCreateChat={() => createChat(activeProject.id)}
                     onMessagesChange={(chatId, messages) => updateChatMessages(activeProject.id, chatId, messages)}
-                />}
+                /> : <section className="empty-project-state">
+                    <h1>Add a project to get started</h1>
+                    <p>Choose a local folder to begin a workspace.</p>
+                    <Button onClick={() => setDialogOpen(true)}><Plus data-icon="inline-start" />Add project</Button>
+                </section>}
             </main>
         </SidebarProvider>
     </TooltipProvider>
