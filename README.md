@@ -1,6 +1,6 @@
 # Open Foreman
 
-An Electron workspace for coding agents, built with React, shadcn/ui and AI Elements. The desktop agent runtime uses the official **pi coding agent SDK 0.73.1**; conversations and tool execution are real SDK sessions, not simulated replies.
+An Electron workspace for coding agents, built with React, shadcn/ui and AI Elements. The desktop agent runtime uses the official **pi coding agent SDK**; conversations and tool execution are real SDK sessions, not simulated replies.
 
 ## Run
 
