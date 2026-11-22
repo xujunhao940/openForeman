@@ -1,5 +1,5 @@
-import {ChevronsUpDown} from 'lucide-react'
-import {DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem} from '@/components/ui/dropdown-menu'
+import {ChevronsUpDown, ChevronDown, Moon, MonitorOff, MonitorUp, Pause, ListChecks} from 'lucide-react'
+import {DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuGroup, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuLabel} from '@/components/ui/dropdown-menu'
 import type {WorkspaceMode} from '../shared/work'
 import {useEffect, useEffectEvent, useState} from "react"
 import {Archive, FolderOpen, Ellipsis as MoreHorizontal, Plus, Puzzle, Gear as Settings2, PencilToSquare as SquarePen} from "@gravity-ui/icons"
@@ -38,9 +38,11 @@ import {
 import Project from "@/pages/project.tsx"
 import Settings from "@/pages/settings.tsx"
 import Plugins from "@/pages/plugins.tsx"
+import BackgroundTasks from "@/pages/background-tasks.tsx"
 import {useAgentEvents} from '@/hooks/use-agent-events'
 import type {AgentMessage} from '../shared/agent'
 import type {MenuCommand} from '../shared/menu'
+import type {SleepMode} from '../shared/power'
 
 type ProjectEntry = { id: string; name: string; path: string }
 type ChatMessage = AgentMessage
@@ -91,12 +93,27 @@ export default function App() {
     const [projectPath, setProjectPath] = useState("")
     const [settingsOpen, setSettingsOpen] = useState(false)
     const [pluginsOpen, setPluginsOpen] = useState(false)
+    const [backgroundTasksOpen, setBackgroundTasksOpen] = useState(false)
+    const [sleepMode, setSleepMode] = useState<SleepMode>(() => {
+        const saved = localStorage.getItem('foreman_sleep_mode')
+        return saved === 'screen-on' || saved === 'screen-off' || saved === 'lid-closed' ? saved : 'off'
+    })
+    const [sleepControlSupported, setSleepControlSupported] = useState(false)
     const [detailsProjectId, setDetailsProjectId] = useState<string | null>(null)
     const activeProject = projects.find((project) => project.id === activeProjectId)
     const activeChats = activeProject ? (projectChats[activeProject.id] ?? []).filter(inMode) : []
     const activeChatId = activeProject ? activeChatIds[selectionKey(activeProject.id)] ?? activeChats.find(chat => !chat.archived)?.id : undefined
-    const titlebarPage = pluginsOpen ? 'Plugins' : settingsOpen ? 'Settings' : null
+    const titlebarPage = backgroundTasksOpen ? 'Background tasks' : pluginsOpen ? 'Plugins' : settingsOpen ? 'Settings' : null
     const titlebarChat = activeChats.find(chat => chat.id === activeChatId)?.name ?? 'New chat'
+
+    useEffect(() => {
+        void window.powerAPI?.supported().then(setSleepControlSupported)
+    }, [])
+
+    useEffect(() => {
+        localStorage.setItem('foreman_sleep_mode', sleepMode)
+        void window.powerAPI?.setMode(sleepMode).catch(error => console.error('Could not update sleep mode.', error))
+    }, [sleepMode])
 
     useAgentEvents((event) => {
         if (event.type !== 'message') return
@@ -111,15 +128,17 @@ export default function App() {
         window.localStorage.setItem(CHATS_STORAGE_KEY, JSON.stringify(projectChats))
     }, [projectChats])
 
-    function openPage(page: 'settings' | 'plugins') {
+    function openPage(page: 'settings' | 'plugins' | 'background-tasks') {
         setSettingsOpen(page === 'settings')
         setPluginsOpen(page === 'plugins')
+        setBackgroundTasksOpen(page === 'background-tasks')
     }
 
     function openNewChat(projectId: string) {
         setActiveProjectId(projectId)
         setSettingsOpen(false)
         setPluginsOpen(false)
+        setBackgroundTasksOpen(false)
         setActiveChatIds(current => ({...current, [selectionKey(projectId)]: ""}))
     }
 
@@ -156,6 +175,7 @@ export default function App() {
         setActiveProjectId(project.id)
         setSettingsOpen(false)
         setPluginsOpen(false)
+        setBackgroundTasksOpen(false)
         setProjectName("")
         setProjectPath("")
         setDialogOpen(false)
@@ -259,11 +279,12 @@ export default function App() {
                                     render={<SidebarMenuItem />}
                                 >
                                     <CollapsibleTrigger render={<SidebarMenuButton
-                                        isActive={!settingsOpen && !pluginsOpen && project.id === activeProject.id && !activeChatId}
+                                        isActive={!settingsOpen && !pluginsOpen && !backgroundTasksOpen && project.id === activeProject.id && !activeChatId}
                                         onClick={() => {
                                             setActiveProjectId(project.id)
                                             setSettingsOpen(false)
                                             setPluginsOpen(false)
+                                            setBackgroundTasksOpen(false)
                                         }}
                                         tooltip={project.name}
                                         className="project-nav-item"
@@ -349,6 +370,40 @@ export default function App() {
                 <SidebarFooter className="sidebar-settings-footer">
                     <SidebarMenu>
                         <SidebarMenuItem>
+                            <DropdownMenu>
+                                <DropdownMenuTrigger
+                                    render={<SidebarMenuButton className="settings-nav-item sleep-control-trigger" tooltip="Sleep control" />}
+                                    aria-label={`Sleep control: ${sleepMode === 'screen-on' ? 'Screen on' : sleepMode === 'screen-off' ? 'Screen off' : sleepMode === 'lid-closed' ? 'Lid closed' : 'Idle'}`}
+                                >
+                                    <Moon />
+                                    <span>Sleep Control · {sleepMode === 'screen-on' ? 'Screen on' : sleepMode === 'screen-off' ? 'Screen off' : sleepMode === 'lid-closed' ? 'Lid closed' : 'Idle'}</span>
+                                    <ChevronDown className="sleep-control-chevron" aria-hidden="true" />
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent side="top" align="start" className="sleep-control-menu">
+                                    <DropdownMenuGroup>
+                                        <DropdownMenuLabel>Sleep control</DropdownMenuLabel>
+                                    </DropdownMenuGroup>
+                                    <DropdownMenuRadioGroup value={sleepMode} onValueChange={value => {
+                                        if (value === 'screen-on' || value === 'screen-off' || value === 'lid-closed' || value === 'off') setSleepMode(value)
+                                    }}>
+                                        {([
+                                            {mode: 'screen-on', label: 'Screen on', title: 'Keep the system awake and screen on during tasks', icon: <MonitorUp />},
+                                            {mode: 'screen-off', label: 'Screen off', title: 'Keep the system awake while allowing the screen to turn off', icon: <MonitorOff />},
+                                            {mode: 'lid-closed', label: 'Lid closed', title: 'Continue tasks with the lid closed', icon: <Moon />},
+                                            {mode: 'off', label: 'Idle', title: 'Disable sleep control', icon: <Pause />},
+                                        ] as const).map(option => <DropdownMenuRadioItem key={option.mode} value={option.mode} disabled={!sleepControlSupported} title={option.title}>
+                                            {option.icon}<span>{option.label}</span>
+                                        </DropdownMenuRadioItem>)}
+                                    </DropdownMenuRadioGroup>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+                        </SidebarMenuItem>
+                        <SidebarMenuItem>
+                            <SidebarMenuButton isActive={backgroundTasksOpen} onClick={() => openPage('background-tasks')} tooltip="Background tasks" className="settings-nav-item">
+                                <ListChecks /><span>Background tasks</span>
+                            </SidebarMenuButton>
+                        </SidebarMenuItem>
+                        <SidebarMenuItem>
                             <SidebarMenuButton
                                 isActive={pluginsOpen}
                                 onClick={() => openPage('plugins')}
@@ -384,7 +439,7 @@ export default function App() {
                         </>}
                     </div>
                 </header>
-                {pluginsOpen ? <Plugins /> : settingsOpen ? <Settings /> : activeProject ? <Project
+                {backgroundTasksOpen ? <BackgroundTasks projects={projects} initialProjectId={activeProjectId} /> : pluginsOpen ? <Plugins /> : settingsOpen ? <Settings /> : activeProject ? <Project
                     key={selectionKey(activeProject.id)}
                     workspaceMode={workspaceMode}
                     projectId={activeProject.id}

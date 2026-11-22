@@ -1,10 +1,10 @@
 import {createHash, randomUUID} from 'node:crypto'
-import {createTwoFilesPatch, diffLines} from 'diff'
+import {formatPatch, structuredPatch} from 'diff'
 import {execFile} from 'node:child_process'
 import {promisify} from 'node:util'
 import {mkdir, readFile, readdir, realpath, lstat, writeFile, rename, unlink, chmod} from 'node:fs/promises'
 import path from 'node:path'
-import type {CheckpointInfo, ReviewFile} from '../../shared/agent'
+import type {CheckpointInfo, ReviewFile, TurnChanges} from '../../shared/agent'
 
 const exec = promisify(execFile)
 export async function readJson<T>(file: string, fallback: T): Promise<T> {
@@ -102,6 +102,17 @@ export class CheckpointStore {
         } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error }
     }
     async capture(label: string) {
+        return (await this.captureSnapshot(label)).snapshot.info
+    }
+    async finishRun(beforeId: string): Promise<TurnChanges> {
+        const {snapshot, previous} = await this.captureSnapshot('After run')
+        const afterId = snapshot.info.id
+        if (beforeId === afterId) return {beforeId, afterId, files: []}
+        const before = previous?.info.id === beforeId ? previous : await this.snapshot(beforeId)
+        if (!before) throw new Error('Checkpoint is unavailable.')
+        return {beforeId, afterId, files: compareSnapshots(before, snapshot)}
+    }
+    private async captureSnapshot(label: string) {
         const names = await projectFiles(this.cwd)
         if (names.length > 4000) throw new Error('Checkpoint limit: 4,000 files.')
         const files: Snapshot['files'] = {}
@@ -115,17 +126,18 @@ export class CheckpointStore {
         }
         const state = await this.state()
         const current = state.snapshots[state.cursor]
-        if (current) {
-            const previous = await this.snapshot(current.id)
-            if (previous && Object.keys(previous.files).length === Object.keys(files).length
-                && Object.keys(files).every(file => same(files[file], previous.files[file]))) return current
+        const previous = current ? await this.snapshot(current.id) : undefined
+        if (previous && Object.keys(previous.files).length === Object.keys(files).length
+            && Object.keys(files).every(file => same(files[file], previous.files[file]))) {
+            return {snapshot: previous, previous}
         }
         const info = {id: randomUUID(), label, createdAt: new Date().toISOString(), files: Object.keys(files).length}
         const snapshots = state.snapshots.slice(0, state.cursor + 1)
         snapshots.push(info)
-        await atomicJson(path.join(this.directory, `${info.id}.json`), {info, files})
+        const snapshot = {info, files}
+        await atomicJson(path.join(this.directory, `${info.id}.json`), snapshot)
         await this.save({snapshots, cursor: snapshots.length - 1})
-        return info
+        return {snapshot, previous}
     }
     async restore(id: string) {
         const state = await this.state()
@@ -158,25 +170,32 @@ export class CheckpointStore {
     async changedFiles(beforeId: string, afterId: string) {
         const [before, after] = await Promise.all([this.snapshot(beforeId), this.snapshot(afterId)])
         if (!before || !after) throw new Error('Checkpoint is unavailable.')
-        const names = [...new Set([...Object.keys(before.files), ...Object.keys(after.files)])]
-            .filter(file => !same(before.files[file], after.files[file]))
-        return names.map(file => {
-            const old = before.files[file] ? Buffer.from(before.files[file].content, 'base64') : undefined
-            const next = after.files[file] ? Buffer.from(after.files[file].content, 'base64') : undefined
-            const binary = !!old?.includes(0) || !!next?.includes(0)
-            const oldText = old?.toString('utf8') ?? ''
-            const nextText = next?.toString('utf8') ?? ''
-            const fullPatch = binary ? '' : createTwoFilesPatch(file, file, oldText, nextText, '', '', {context: 3})
-            const patch = fullPatch.slice(0, 80000)
-            const lineChanges = binary ? [] : diffLines(oldText, nextText)
-            const countLines = (value: string) => value ? value.split(/\r?\n/).filter((line, index, all) => index < all.length - 1 || line !== '').length : 0
-            const additions = lineChanges.reduce((sum, part) => sum + (part.added ? countLines(part.value) : 0), 0)
-            const deletions = lineChanges.reduce((sum, part) => sum + (part.removed ? countLines(part.value) : 0), 0)
-            return {path: file, status: !old ? 'added' as const : !next ? 'deleted' as const : 'modified' as const,
-                additions, deletions,
-                patch, binary, truncated: fullPatch.length > patch.length}
-        })
+        return compareSnapshots(before, after)
     }
+}
+
+function compareSnapshots(before: Snapshot, after: Snapshot) {
+    const names = [...new Set([...Object.keys(before.files), ...Object.keys(after.files)])]
+        .filter(file => !same(before.files[file], after.files[file]))
+    return names.map(file => {
+        const old = before.files[file] ? Buffer.from(before.files[file].content, 'base64') : undefined
+        const next = after.files[file] ? Buffer.from(after.files[file].content, 'base64') : undefined
+        const binary = !!old?.includes(0) || !!next?.includes(0)
+        const delta = binary ? undefined : structuredPatch(file, file, old?.toString('utf8') ?? '', next?.toString('utf8') ?? '', '', '', {context: 3})
+        const fullPatch = delta ? formatPatch(delta) : ''
+        const patch = fullPatch.slice(0, 80000)
+        let additions = 0
+        let deletions = 0
+        for (const hunk of delta?.hunks ?? []) {
+            for (const line of hunk.lines) {
+                if (line.startsWith('+')) additions++
+                else if (line.startsWith('-')) deletions++
+            }
+        }
+        return {path: file, status: !old ? 'added' as const : !next ? 'deleted' as const : 'modified' as const,
+            additions, deletions,
+            patch, binary, truncated: fullPatch.length > patch.length}
+    })
 }
 
 async function diffBase(cwd: string) {

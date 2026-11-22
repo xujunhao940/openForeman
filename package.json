@@ -36,6 +36,7 @@
     "cn": "^0.5.2",
     "diff": "^8.0.2",
     "lucide-react": "^1.73.0",
+    "modern-web-guidance": "1.0.1",
     "motion": "^14.14.0",
     "nanoid": "^6.0.2",
     "react": "^19.3.1",
@@ -71,5 +72,6 @@
   },
   "main": "dist-electron/main.js",
   "packageManager": "yarn@4.5.3+sha512.3003a14012e2987072d244c720506549c1aab73ee728208f1b2580a9fd67b92d61ba6b08fe93f6dce68fd771e3af1e59a0afa28dd242dd0940d73b95fedd4e90",
-  "description": "A pi-powered desktop workspace for coding agents"
+  "description": "A pi-powered desktop workspace for coding agents",
+  "homepage": "https://github.com/xujunhao940/openForeman"
 }

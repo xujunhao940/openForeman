@@ -18,7 +18,7 @@
   </p>
 </div>
 
-## 快速开始
+## 🚀 快速开始
 
 **环境要求：** Node.js 22.19+ 和 Yarn 4.5.3。
 
@@ -36,7 +36,11 @@ Provider 使用 OpenAI Chat Completions 协议，支持自定义 Base URL 和无
 
 浏览器预览可渲染界面和预览插件设置。文件访问和智能体运行需要 Electron。预览中的设置与桌面运行时配置相互独立。
 
-## 功能
+## 🧰 功能
+
+### ⚡ Foreman Mode
+
+Foreman Mode 会为并行 Subagents“超频”。主智能体在自行调查或回答前，必须先并行启动至少两个有价值、彼此独立且只读的研究任务，并为每个任务设定不同的交付物。并发上限随推理强度变化：Low 为 3、Medium 为 6、High 为 9、Xhigh 为 12。子代理不能继续委派。
 
 以下十项能力均以内置应用代码的形式提供，并作为 pi 运行时的一部分。**Plugins** 页面仅列出全局 Skills 和 MCP 服务器。可在 **Settings → Permissions** 设置默认权限，也可在提示词输入框中为当前对话覆盖权限。配置更改会在下一次运行时生效，运行期间无法更改。
 
@@ -51,11 +55,24 @@ Provider 使用 OpenAI Chat Completions 协议，支持自定义 Base URL 和无
 | 记忆 | 每个项目可维护独立笔记，可在界面中编辑，也可通过受权限控制的 `memory` 工具编辑。笔记会注入后续会话。 |
 | Web 访问 | `web_fetch` 获取公开 HTTP(S) 文本、HTML 或 JSON。系统会检查并固定 DNS 解析结果、重新验证重定向，并限制请求超时为 30 秒、响应体最大为 1 MiB。此功能不提供搜索引擎结果或浏览器自动化。 |
 | MCP | 通过 stdio 和 Streamable HTTP 发现并调用工具。在 Plugins 中配置服务器。连接和调用均需权限，并按可能修改数据的操作处理，因此 Plan、Review 和 Read only 模式不可用。 |
+| Modern Web Guidance | 内置 Google 的 `modern-web-guidance` 和 `chrome-extensions` 技能，并提供本地搜索与指南检索工具。实验性和 Origin Trial 指南需要在 `.mwgrc` 中显式启用。 |
 | 撤销与重做 | 在检查点之间恢复工作区文件，并在写入前检查所有受影响路径是否冲突，同时保留无关文件。只有工作区文件发生变化时，助手回复末尾才会显示相应操作；每条回复只针对自身运行前后的快照。此功能依赖检查点，只恢复工作区文件，不恢复模型对话历史。 |
 | 代码审查 | 文件浏览器会显示相对于 HEAD 的暂存和未暂存改动、未跟踪文件内容、逐文件统计、行号和彩色增删标记。使用智能体审查会启动只读检查。 |
-| Skills | pi 会发现项目中的 `.pi/skills`、`.agents/skills` 和明确注册的全局技能目录。技能会显示在界面和 pi 系统提示中，使用 `/skill:name` 调用对应说明。项目中的任意扩展代码不会被自动加载。 |
+| Skills | 内置 Modern Web Guidance 和 Chrome Extensions 技能，也会发现项目中的 `.pi/skills`、`.agents/skills` 和已注册的全局技能目录。技能会显示在界面和 pi 系统提示中，使用 `/skill:name` 调用对应说明。项目中的任意扩展代码不会被自动加载。 |
 
-## 安全与限制
+## 📊 Terminal-Bench 实测
+
+七项任务 · 两边使用相同模型和推理强度 · `gpt-6.2-sol (xhigh)`
+
+![各任务总 token，Foreman 为黄色，Codex CLI 为黑色。](benchmarks/terminal-bench/charts/total-tokens.png)
+
+![各任务执行时间，Foreman 为黄色，Codex CLI 为黑色。](benchmarks/terminal-bench/charts/execution-time.png)
+
+![各任务测试得分，Foreman 为黄色，Codex CLI 为黑色。](benchmarks/terminal-bench/charts/test-results.png)
+
+详细说明参考 [`benchmarks/terminal-bench/README.md`](benchmarks/terminal-bench/README.md)。
+
+## 🔐 安全与限制
 
 Shell 是经过批准的本地 Shell，不是操作系统沙箱。文件工具会验证项目路径和符号链接。批准 Shell 或 MCP 服务器后，相关操作可能访问工作区以外的内容。Read only 模式会阻止这些操作。检查点无法撤销外部网络影响、工作区外的 Shell 修改或 MCP 操作产生的影响。
 
@@ -63,7 +80,7 @@ Shell 是经过批准的本地 Shell，不是操作系统沙箱。文件工具�
 
 同一项目目录同时只能运行一个对话，以避免写入或恢复操作相互重叠。不同项目可以并行运行。停止操作会取消根会话、子代理和待处理审批。重启后，pi 会按项目和对话恢复 JSONL 历史。渲染进程会将可见消息保存在 localStorage 中。
 
-## 项目结构
+## 🏗️ 项目结构
 
 | 文件 | 职责 |
 | --- | --- |
@@ -78,7 +95,7 @@ Shell 是经过批准的本地 Shell，不是操作系统沙箱。文件工具�
 
 运行时配置、工作区记忆、检查点和 pi 会话保存在 Electron 的 `userData/agent/` 目录下。请勿将凭据保存在项目记忆或 MCP 命令参数中。
 
-## 验证与打包
+## 🧪 验证与打包
 
 ```sh
 yarn typecheck

@@ -3,6 +3,7 @@ import path from 'node:path'
 import electron from 'vite-plugin-electron/simple'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import {openSourceLicenses} from './build/open-source-licenses'
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -11,6 +12,7 @@ export default defineConfig({
         entries: ['index.html'],
     },
     plugins: [
+        openSourceLicenses(),
         react(),
         tailwindcss(),
         electron({
@@ -20,7 +22,7 @@ export default defineConfig({
                 vite: {
                     build: {
                         rollupOptions: {
-                            external: [/^@mariozechner\//, /^@modelcontextprotocol\//, 'typebox'],
+                            external: [/^@mariozechner\//, /^@modelcontextprotocol\//, /^modern-web-guidance(?:\/.*)?$/, 'typebox'],
                         },
                     },
                 },

@@ -44,9 +44,97 @@
     padding-top: 36px;
 }
 
+.background-tasks-page {
+    display: flex;
+    width: min(100%, 980px);
+    height: calc(100svh - 36px);
+    min-height: 0;
+    flex-direction: column;
+    gap: 18px;
+    margin-inline: auto;
+    padding: 42px 48px 32px;
+    overflow: auto;
+}
+
+.background-tasks-header,
+.background-task-summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.background-tasks-header {
+    justify-content: space-between;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--border);
+}
+
+.background-tasks-header h1 {
+    margin: 0;
+    font-family: var(--heading-face);
+    font-size: 18px;
+    font-weight: 400;
+}
+
+.background-tasks-header [data-slot="select-trigger"] { min-width: 170px; }
+.background-task-summary button svg { width: 15px; height: 15px; }
+.background-task-error { margin: 0; color: var(--destructive); font-size: 12px; }
+.background-task-empty { margin: 8px 0; color: var(--muted-foreground); font-size: 12px; }
+.background-task-list { display: grid; gap: 16px; margin: 0; padding: 0; list-style: none; }
+.background-task-item { min-width: 0; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+.background-task-summary { min-width: 0; }
+.background-task-summary strong { min-width: 0; overflow: hidden; font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.background-task-summary code { min-width: 0; flex: 0 1 auto; overflow: hidden; color: var(--muted-foreground); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.background-task-status { flex: 0 0 auto; color: var(--muted-foreground); font-size: 11px; text-transform: capitalize; }
+.background-task-status.status-running { color: var(--primary); }
+.background-task-status.status-ready { color: var(--primary); }
+.background-task-status.status-failed { color: var(--destructive); }
+.background-task-cwd { min-width: 0; flex: 1; overflow: hidden; color: var(--muted-foreground); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.background-task-output { max-height: 240px; margin: 8px 0 0; padding: 10px 12px; overflow: auto; border: 1px solid var(--border); background: var(--muted); color: var(--foreground); font-family: var(--font-mono); font-size: 11px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+@media (max-width: 640px) {
+    .background-tasks-page { padding: 28px 18px; }
+    .background-task-summary { flex-wrap: wrap; }
+    .background-task-cwd { flex-basis: calc(100% - 60px); }
+}
+
 /* Keep the active sidebar item at the same weight as its resting state. */
 .sidebar [data-slot="sidebar-menu-button"][data-active] {
     font-weight: inherit;
+}
+
+.sleep-control-trigger {
+    gap: 8px;
+}
+
+.sleep-control-trigger > span:nth-of-type(1) {
+    min-width: 0;
+    flex: 1;
+}
+
+.sleep-control-chevron {
+    margin-left: auto;
+    opacity: 0.65;
+}
+
+.sleep-control-menu {
+    width: 260px;
+}
+
+.sleep-control-menu [data-slot="dropdown-menu-label"] {
+    font-size: 11px;
+}
+
+.sleep-control-menu [data-slot="dropdown-menu-radio-item"] {
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 400;
+}
+
+.sleep-control-menu [data-slot="dropdown-menu-radio-item"] > svg {
+    width: 14px;
+    height: 14px;
+    flex: 0 0 auto;
 }
 
 .sidebar-brand {

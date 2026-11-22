@@ -4,11 +4,17 @@ import {readKey} from '../providers'
 import {AgentRuntime} from './runtime'
 import {serveAgent} from './http'
 import type {AgentConfig, QueueAction, RunRequest} from '../../shared/agent'
+import {SleepController} from '../power'
+import type {SleepMode} from '../../shared/power'
 
 export function registerAgentHandlers() {
+    const sleepController = new SleepController()
     const runtime = new AgentRuntime(path.join(app.getPath('userData'), 'agent'), event => {
+        sleepController.handleAgentEvent(event)
         for (const win of BrowserWindow.getAllWindows()) if (!win.isDestroyed()) win.webContents.send('agent:event', event)
     }, readKey)
+    ipcMain.handle('power:supported', () => sleepController.supported())
+    ipcMain.handle('power:set-mode', (_event, mode: SleepMode) => sleepController.setMode(mode))
     ipcMain.handle('agent:config', () => runtime.config())
     ipcMain.handle('agent:replay', () => runtime.replay())
     ipcMain.handle('agent:save-config', (_event, config: AgentConfig) => runtime.saveConfig(config))
@@ -27,7 +33,7 @@ export function registerAgentHandlers() {
         const result = await dialog.showOpenDialog({properties: ['openDirectory']})
         return result.canceled ? null : result.filePaths[0]
     })
-    app.on('before-quit', () => { void runtime.dispose() })
+    app.on('before-quit', () => { sleepController.dispose(); void runtime.dispose() })
     if (process.env.FOREMAN_API_PORT !== undefined) {
         void serveAgent(runtime, Number(process.env.FOREMAN_API_PORT), process.env.FOREMAN_API_TOKEN ?? '').then(({server, port}) => {
             console.info(`Foreman API listening on http://127.0.0.1:${port}`)

@@ -1,6 +1,8 @@
 import { ipcRenderer, contextBridge } from 'electron'
 import type {AgentAPI, AgentEvent} from '../shared/agent'
 import type {MenuAPI, MenuCommand} from '../shared/menu'
+import type {PowerAPI} from '../shared/power'
+import type {BackgroundTasksAPI, BackgroundTask} from '../shared/background-tasks'
 
 if (process.platform === 'darwin') {
   const menuAPI: MenuAPI = {
@@ -43,6 +45,26 @@ contextBridge.exposeInMainWorld('providersAPI', {
   deleteKey: (id: string) => ipcRenderer.invoke('providers:delete-key', id),
   fetchModels: (id: string, baseUrl: string) => ipcRenderer.invoke('providers:fetch-models', id, baseUrl),
 })
+
+const powerAPI: PowerAPI = {
+  supported: () => ipcRenderer.invoke('power:supported'),
+  setMode: mode => ipcRenderer.invoke('power:set-mode', mode),
+}
+contextBridge.exposeInMainWorld('powerAPI', powerAPI)
+
+const backgroundTasksAPI: BackgroundTasksAPI = {
+  list: () => ipcRenderer.invoke('background-task:list'),
+  add: request => ipcRenderer.invoke('background-task:add', request),
+  start: id => ipcRenderer.invoke('background-task:start', id),
+  stop: id => ipcRenderer.invoke('background-task:stop', id),
+  remove: id => ipcRenderer.invoke('background-task:remove', id),
+  subscribe: listener => {
+    const handler = (_event: Electron.IpcRendererEvent, task: BackgroundTask) => listener(task)
+    ipcRenderer.on('background-task:event', handler)
+    return () => ipcRenderer.removeListener('background-task:event', handler)
+  },
+}
+contextBridge.exposeInMainWorld('backgroundTasksAPI', backgroundTasksAPI)
 
 const agentAPI: AgentAPI = {
   config: () => ipcRenderer.invoke('agent:config'),

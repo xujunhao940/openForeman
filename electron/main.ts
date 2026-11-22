@@ -1,11 +1,14 @@
-import { app, BrowserWindow, screen } from 'electron'
+import { app, BrowserView, BrowserWindow, dialog, nativeTheme, screen, shell } from 'electron'
 import { mkdirSync } from 'node:fs'
+import { readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import {registerProviderHandlers} from './providers'
 import {registerAgentHandlers} from './agent/ipc'
+import {registerBackgroundTaskHandlers} from './background-tasks'
 import {installMacMenu, macAppName} from './menu'
 import type {MenuCommand} from '../shared/menu'
+import {homepage} from '../package.json'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -41,10 +44,14 @@ let menuReady: Promise<boolean>
 
 function createWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize
+  const windowWidth = Math.min(850, width)
+  const windowHeight = Math.min(650, height)
   win = new BrowserWindow({
-    width: Math.min(850, width),
-    height: Math.min(650, height),
+    width: windowWidth,
+    height: windowHeight,
     icon: appIcon,
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#191919' : '#f7f7f5',
+    show: true,
     titleBarStyle: "hidden",
     trafficLightPosition: { x: 12, y: 12 },
     ...(process.platform !== 'darwin' ? { titleBarOverlay: true } : {}),
@@ -54,8 +61,30 @@ function createWindow() {
   })
 
   const window = win
-  window.once('closed', () => {
-    win = null
+  const loadingView = new BrowserView()
+  window.setBrowserView(loadingView)
+  loadingView.setBounds({x: 0, y: 0, width: windowWidth, height: windowHeight})
+  loadingView.setAutoResize({width: true, height: true})
+  loadingView.webContents.once('dom-ready', () => window.show())
+  loadingView.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (isMainFrame) console.error(`Startup animation failed to load ${validatedURL} (${errorCode}): ${errorDescription}`)
+    window.show()
+  })
+  window.once('ready-to-show', () => {
+    window.show()
+    setTimeout(() => {
+      if (!window.isDestroyed() && window.getBrowserView() === loadingView) window.removeBrowserView(loadingView)
+    }, 500)
+  })
+  window.once('closed', () => { win = null })
+  window.webContents.ipc.handle('app:open-homepage', () => shell.openExternal(homepage))
+  window.webContents.ipc.handle('app:save-chromium-notices', async () => {
+    const filename = 'LICENSES.chromium.html'
+    const source = VITE_DEV_SERVER_URL
+      ? path.join(app.getAppPath(), 'node_modules', 'electron', 'dist', filename)
+      : path.join(RENDERER_DIST, filename)
+    const {canceled, filePath} = await dialog.showSaveDialog(window, {defaultPath: filename})
+    if (!canceled && filePath) await writeFile(filePath, await readFile(source))
   })
   if (process.platform === 'darwin') {
     menuReady = new Promise(resolve => {
@@ -64,17 +93,18 @@ function createWindow() {
     })
   }
 
-  // Test active push message to Renderer-process.
-  win.webContents.on('did-finish-load', () => {
-    win?.webContents.send('main-process-message', (new Date).toLocaleString())
+  window.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (!isMainFrame) return
+    console.error(`Main window failed to load ${validatedURL} (${errorCode}): ${errorDescription}`)
+    window.show()
   })
-
-  if (VITE_DEV_SERVER_URL) {
-    win.loadURL(VITE_DEV_SERVER_URL)
-  } else {
-    // win.loadFile('dist/index.html')
-    win.loadFile(path.join(RENDERER_DIST, 'index.html'))
-  }
+  window.webContents.on('did-finish-load', () => {
+    window.webContents.send('main-process-message', (new Date).toLocaleString())
+  })
+  if (VITE_DEV_SERVER_URL) void loadingView.webContents.loadURL(`${VITE_DEV_SERVER_URL}/loading.html`)
+  else void loadingView.webContents.loadFile(path.join(RENDERER_DIST, 'loading.html'))
+  if (VITE_DEV_SERVER_URL) void window.loadURL(VITE_DEV_SERVER_URL)
+  else void window.loadFile(path.join(RENDERER_DIST, 'index.html'))
   return window
 }
 
@@ -113,5 +143,6 @@ app.whenReady().then(() => {
   }
   registerProviderHandlers()
   registerAgentHandlers()
+  registerBackgroundTaskHandlers()
   createWindow()
 })

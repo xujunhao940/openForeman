@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import aiohttp
 from aiohttp import web
+from terminal_commands import command_handler
 from harbor.agents.base import BaseAgent
 from harbor.models.agent.context import AgentContext
 
@@ -48,28 +49,8 @@ class ForemanTerminalBench(BaseAgent):
         if effort not in ('low', 'medium', 'high', 'xhigh'):
             raise RuntimeError(f'Unsupported FOREMAN_BENCH_EFFORT: {requested_effort}')
 
-        async def execute(request):
-            if request.headers.get('authorization') != f'Bearer {token}':
-                raise web.HTTPUnauthorized()
-            payload = await request.json()
-            if payload['operation'] == 'start':
-                job_id = uuid4().hex
-                jobs[job_id] = asyncio.create_task(environment.exec(
-                    payload['command'], cwd='/app', timeout_sec=int(payload.get('timeout_sec', 28800))))
-                return web.json_response({'job_id': job_id, 'running': True})
-            job_id = payload.get('job_id')
-            job = jobs.get(job_id)
-            if job is None:
-                raise web.HTTPNotFound(text='Unknown command')
-            if not job.done():
-                return web.json_response({'job_id': job_id, 'running': True})
-            result = await job
-            del jobs[job_id]
-            return web.json_response({'job_id': job_id, 'running': False, 'stdout': result.stdout,
-                                      'stderr': result.stderr, 'return_code': result.return_code})
-
         bridge_app = web.Application()
-        bridge_app.router.add_post('/exec', execute)
+        bridge_app.router.add_post('/exec', command_handler(environment, jobs, token))
         runner = web.AppRunner(bridge_app)
         await runner.setup()
         site = web.TCPSite(runner, '127.0.0.1', 0)
@@ -87,8 +68,12 @@ class ForemanTerminalBench(BaseAgent):
 
             try:
                 app_env = dict(os.environ, FOREMAN_API_PORT=str(api_port), FOREMAN_API_TOKEN=token)
+                user_data_dir = os.environ.get('FOREMAN_BENCH_USER_DATA_DIR')
+                app_args = [str(APP)]
+                if user_data_dir:
+                    app_args.append(f'--user-data-dir={user_data_dir}')
                 with (logs / 'foreman.log').open('wb') as output:
-                    process = await asyncio.create_subprocess_exec(str(APP), env=app_env, stdout=output, stderr=output)
+                    process = await asyncio.create_subprocess_exec(*app_args, env=app_env, stdout=output, stderr=output)
                 for _ in range(60):
                     if process.returncode is not None:
                         raise RuntimeError('Foreman exited before API startup. See agent/foreman.log.')
@@ -101,7 +86,7 @@ class ForemanTerminalBench(BaseAgent):
                     raise RuntimeError('Foreman API startup timed out.')
                 provider = {
                     'id': os.environ['FOREMAN_PROVIDER_ID'],
-                    'name': 'Benchmark provider', 'preset': 'custom',
+                    'name': 'CUSTOM', 'preset': 'custom',
                     'baseUrl': os.environ['FOREMAN_PROVIDER_URL'],
                     'models': [self.model_name],
                 }
@@ -116,7 +101,7 @@ class ForemanTerminalBench(BaseAgent):
                     'command': shutil.which('node'), 'args': [str(BRIDGE), str(bridge_port), token],
                 }]}
                 run = await api('POST', '/runs', {'request': request, 'options': {'config': config, 'mcpOnly': True}})
-                manifest = {'model': self.model_name, 'effort': requested_effort, 'runtime_effort': effort,
+                manifest = {'provider': 'CUSTOM', 'model': self.model_name, 'effort': requested_effort, 'runtime_effort': effort,
                             'context_window': 256000,
                             'app': str(APP), 'tool_scope': 'mcp-only', 'benchmark': 'Terminal-Bench 4.1',
                             'adapter': str(Path(__file__).resolve()), 'run_id': run['runId']}

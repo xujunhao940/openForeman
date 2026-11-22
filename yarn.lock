@@ -8746,6 +8746,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"modern-web-guidance@npm:1.0.1":
+  version: 1.0.1
+  resolution: "modern-web-guidance@npm:1.0.1"
+  bin:
+    modern-web-guidance: skills/modern-web-guidance/modern-web.mjs
+  checksum: 10c0/dea331ca8e047885f8a36adb8d6ae444d2d095c4af7ad199eadde99ae0cb85dff7416687a75ed1b3742823bacf02ee0cb246d57c1b64d2aae4d48b395cb2cc9e
+  languageName: node
+  linkType: hard
+
 "motion-dom@npm:14.14.0":
   version: 14.14.0
   resolution: "motion-dom@npm:14.14.0"
@@ -9062,6 +9071,7 @@ __metadata:
     eslint-plugin-react-hooks: "npm:^4.6.0"
     eslint-plugin-react-refresh: "npm:^0.4.5"
     lucide-react: "npm:^1.73.0"
+    modern-web-guidance: "npm:1.0.1"
     motion: "npm:^14.14.0"
     nanoid: "npm:^6.0.2"
     react: "npm:^19.3.1"

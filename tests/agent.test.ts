@@ -11,15 +11,54 @@ import {execFileSync} from 'node:child_process'
 import {CheckpointStore, workspaceDir, safeProjectFile, workspaceDiff, workspaceReview} from '../electron/agent/storage'
 import {PermissionGate} from '../electron/agent/permissions'
 import {AgentRuntime, foremanModeSubagentLimit, type RunOptions} from '../electron/agent/runtime'
+import {projectToolOutputs} from '../electron/agent/tool-output'
 import {connectMcp} from '../electron/agent/mcp'
+import {modernWebGuidancePaths, modernWebGuidanceTools} from '../electron/agent/modern-web-guidance'
 import {fetchPublicPage} from '../electron/agent/web'
 import {defaultAgentConfig, type AgentConfig, type AgentEvent, type RunRequest} from '../shared/agent'
 
 const config = (): AgentConfig => structuredClone(defaultAgentConfig)
 const temp = async () => realpath(await mkdtemp(path.join(tmpdir(), 'foreman-test-')))
 
+test('tool output references stay inside the current request and explicit pages remain readable', () => {
+    const text = '0123456789'.repeat(2000)
+    const original = {role: 'toolResult' as const, toolName: 'read', toolCallId: 'first', timestamp: 1, isError: false,
+        content: [{type: 'text' as const, text}]}
+    const again = {...original, toolCallId: 'second', isError: true}
+    const page = {...original, toolName: 'read_tool_output', content: [{type: 'text' as const, text: text.slice(0, 8000)}]}
+    for (const paging of [false, true]) {
+        const projected = projectToolOutputs([original, again, page, page], paging)
+        const serialized = JSON.stringify(projected[1])
+        assert.match(serialized, /callId=first, block=0/)
+        assert.match(serialized, /"isError":true/)
+        assert.equal(projected[2], page)
+        assert.equal(projected[3], page)
+        assert.doesNotMatch(JSON.stringify(projectToolOutputs([again], paging)), /callId=first|Identical to/)
+    }
+    assert.equal(original.content[0].text, text)
+    assert.deepEqual(projectToolOutputs([original], false)[0], original)
+    assert.match(JSON.stringify(projectToolOutputs([original], true)), /read_tool_output/)
+})
+
 test('Foreman Mode scales subagent concurrency with reasoning effort', () => {
     assert.deepEqual(['low', 'medium', 'high', 'xhigh'].map(foremanModeSubagentLimit), [3, 6, 9, 12])
+})
+
+test('bundled modern web guidance skills and search tools enforce project opt-in', async () => {
+    const root = await temp()
+    try {
+        await mkdir(path.join(root, '.git'))
+        assert.equal(modernWebGuidancePaths().length, 2)
+        const [search, retrieve] = modernWebGuidanceTools(root)
+        const searchResult = await search.execute('search', {query: 'responsive container queries'}, undefined, undefined, {} as never)
+        assert.match(JSON.stringify(searchResult.content), /responsive-design/)
+        const retrieved = await retrieve.execute('retrieve', {ids: ['responsive-design']}, undefined, undefined, {} as never)
+        assert.match(JSON.stringify(retrieved.content), /responsive-design/)
+        await assert.rejects(retrieve.execute('retrieve', {ids: ['language-model']}, undefined, undefined, {} as never), /requires explicit project opt-in/)
+        await writeFile(path.join(root, '.mwgrc'), JSON.stringify({allowVolatileFeatures: true}))
+        const optedIn = await retrieve.execute('retrieve', {ids: ['language-model']}, undefined, undefined, {} as never)
+        assert.match(JSON.stringify(optedIn.content), /LanguageModel/)
+    } finally { await rm(root, {recursive: true, force: true}) }
 })
 
 test('checkpoints restore writes, additions and deletions, preserve unrelated edits, and reject conflicts', async () => {
@@ -31,7 +70,11 @@ test('checkpoints restore writes, additions and deletions, preserve unrelated ed
         const before = await store.capture('before')
         await writeFile(path.join(cwd, 'a.txt'), 'after')
         await writeFile(path.join(cwd, 'new.txt'), 'new')
-        const after = await store.capture('after')
+        const changes = await store.finishRun(before.id)
+        assert.deepEqual(changes.files.map(file => file.path).sort(), ['a.txt', 'new.txt'])
+        const after = {id: changes.afterId}
+        assert.deepEqual((await store.finishRun(after.id)).files, [])
+        assert.deepEqual((await store.finishRun(before.id)).files, changes.files)
         await writeFile(path.join(cwd, 'unrelated.txt'), 'keep me')
         await store.restore(before.id)
         assert.equal(await readFile(path.join(cwd, 'a.txt'), 'utf8'), 'before')
@@ -47,6 +90,23 @@ test('checkpoints restore writes, additions and deletions, preserve unrelated ed
         await assert.rejects(safeProjectFile(cwd, 'outside/file.txt'), /Symlink/)
         await assert.rejects(safeProjectFile(cwd, '.git/config'), /outside .git/)
     } finally { await rm(root, {recursive: true, force: true}) }
+})
+
+test('auto-mode MCP discovery refills a free slot and preserves configured tool order', async () => {
+    const ids = ['first', 'second', 'third', 'fourth', 'fifth']
+    const servers = ids.map(id => ({id, name: id, enabled: true, transport: 'stdio' as const,
+        command: process.execPath, args: [path.resolve('tests/fixtures/mcp-server.mjs')]}))
+    let releaseFirst: () => void
+    const firstReady = new Promise<void>(resolve => { releaseFirst = resolve })
+    const signal = AbortSignal.timeout(5000)
+    signal.addEventListener('abort', () => releaseFirst(), {once: true})
+    const connection = await connectMcp(servers, async name => {
+        if (name.endsWith(':first')) await firstReady
+        if (name.endsWith(':fifth')) releaseFirst()
+    }, signal, true)
+    try {
+        assert.deepEqual(connection.tools.map(tool => tool.name), ids.map(id => `mcp_${id}_ping`))
+    } finally { await connection.close() }
 })
 
 test('permission gate blocks plan/read-only writes, denies disabled approvals, resolves aborts', async () => {
@@ -137,7 +197,21 @@ test('pi runtime streams actual SDK events, gates writes, persists sessions, and
                 if (++arrivals === 2) releasePair()
                 await pairReady
             }
-            const tool = childResearch ? {name: 'read', arguments: JSON.stringify({path: 'README.md'})}
+            const pageTask = text.includes('READ_PAGED_RESULT')
+            const catalogTask = text.includes('Find a record in the library')
+            const toolNames = body.tools?.map((tool: {function: {name: string}}) => tool.function.name) ?? []
+            const catalogStep = messages.slice(lastUser + 1).filter((message: {role: string}) => message.role === 'tool').length
+            const lookup = 'mcp_library_lookup_3'
+            const load = catalogTask && !alreadyCalled && !toolNames.includes(lookup)
+            const callLookup = catalogTask && toolNames.includes(lookup) && catalogStep < 2
+                && !messages.slice(lastUser + 1).some((m: {role: string; content: string}) => m.role === 'tool' && JSON.stringify(m.content).includes('record 3'))
+            const readingPage = pageTask && catalogStep === 1 && toolNames.includes('read_tool_output')
+            const readCall = readingPage ? messages.findLast((m: {role: string}) => m.role === 'tool') : undefined
+            const tool = pageTask && !alreadyCalled ? {name: 'read', arguments: JSON.stringify({path: 'large.txt'})}
+                : readingPage ? {name: 'read_tool_output', arguments: JSON.stringify({callId: readCall.tool_call_id, block: 0, offset: 6000})}
+                : load ? {name: 'load_mcp_tools', arguments: JSON.stringify({names: [lookup]})}
+                : callLookup ? {name: lookup, arguments: '{}'}
+                : childResearch ? {name: 'read', arguments: JSON.stringify({path: 'README.md'})}
                 : write ? {name: 'write', arguments: JSON.stringify({path: 'output.txt', content: 'from pi'})}
                 : plan ? {name: 'update_plan', arguments: JSON.stringify({steps: ['Inspect project', 'Implement change']})}
                 : delegateNow ? {name: 'subagent', arguments: JSON.stringify(text.includes('SOLO') ? {task: questions[0]} : {tasks: text.includes('SINGLE') ? questions.slice(0, 1) : text.includes('DUPLICATE') ? [questions[0], questions[0]] : questions})}
@@ -147,7 +221,7 @@ test('pi runtime streams actual SDK events, gates writes, persists sessions, and
             chunk({role: 'assistant'})
             if (reviewingAction) {
                 chunk({content: /WRITE_REVIEW_ASK/.test(text) ? 'ASK' : 'APPROVE'}); chunk({}, 'stop')
-            } else if (tool && !alreadyCalled) {
+            } else if (tool && (!alreadyCalled || callLookup || readingPage)) {
                 if (childResearch) chunk({content: 'Unverified preliminary hypothesis'})
                 chunk({tool_calls: [{index: 0, id: `call_${Date.now()}`, type: 'function', function: tool}]})
                 chunk({}, 'tool_calls')
@@ -322,6 +396,34 @@ test('pi runtime streams actual SDK events, gates writes, persists sessions, and
         await run(request('chat-plugins', 'Hello'))
         const tools = requests[requests.length - 1].tools as {function: {name: string}}[]
         assert.ok(!tools.some(tool => ['web_fetch', 'subagent'].includes(tool.function.name)))
+        const catalogConfig = config()
+        catalogConfig.mcpServers = [{id: 'library', name: 'Library', enabled: true, transport: 'stdio', command: process.execPath,
+            args: [path.resolve('tests/fixtures/mcp-server.mjs'), '--catalog']}]
+        const catalogStart = requests.length
+        await run({...request('catalog', 'Find a record in the library'), permissionMode: 'auto'}, {config: catalogConfig})
+        console.log('Large MCP catalog first request bytes', Buffer.byteLength(JSON.stringify(requests[catalogStart])))
+        console.log('Large MCP catalog task requests / bytes', requests.length - catalogStart, Buffer.byteLength(JSON.stringify(requests.slice(catalogStart))))
+        const requestToolNames = (index: number) => (requests[index].tools as {function: {name: string}}[]).map(tool => tool.function.name)
+        assert.ok(requestToolNames(catalogStart).includes('load_mcp_tools'))
+        assert.ok(!requestToolNames(catalogStart).includes('mcp_library_lookup_3'))
+        assert.ok(requestToolNames(catalogStart + 1).includes('mcp_library_lookup_3'))
+        assert.ok(!requestToolNames(catalogStart + 1).includes('mcp_library_lookup_4'))
+        assert.match(JSON.stringify(requests.at(-1)?.messages), /record 3/)
+        const namedStart = requests.length
+        await run({...request('catalog-named', 'Find a record in the library using mcp_library_lookup_3'), permissionMode: 'auto'}, {config: catalogConfig})
+        assert.ok(requestToolNames(namedStart).includes('mcp_library_lookup_3'))
+        assert.equal(requests.length - namedStart, 2)
+        await writeFile(path.join(cwd, 'large.txt'), 'a'.repeat(6000) + 'recovered middle' + 'b'.repeat(15000))
+        const aliasStart = requests.length
+        await run({...request('catalog-short', 'Find a record in the library using lookup 3'), permissionMode: 'auto'}, {config: catalogConfig})
+        assert.ok(requestToolNames(aliasStart).includes('mcp_library_lookup_3'))
+        assert.equal(requests.length - aliasStart, 2)
+        const pageStart = requests.length
+        await run(request('page-on-demand', 'READ_PAGED_RESULT'))
+        assert.ok(!requestToolNames(pageStart).includes('read_tool_output'))
+        assert.ok(requestToolNames(pageStart + 1).includes('read_tool_output'))
+        assert.doesNotMatch(JSON.stringify(requests[pageStart + 1].messages), /recovered middle/)
+        assert.match(JSON.stringify(requests.at(-1)?.messages), /recovered middle/)
         const savedConfig = await runtime.config()
         const isolatedConfig = config()
         isolatedConfig.mcpServers = [{id: 'test', name: 'Test', enabled: true, transport: 'stdio', command: process.execPath,
@@ -400,6 +502,9 @@ test('global skills import enabled across projects, toggle off, remove and valid
     try {
         const a = path.join(root, 'a'), b = path.join(root, 'b'), skill = path.join(root, 'global-skill')
         await Promise.all([mkdir(a), mkdir(b), mkdir(skill)])
+        const initialWorkspace = await runtime.workspace(a)
+        assert.ok(initialWorkspace.skills.some(item => item.name === 'modern-web-guidance'))
+        assert.ok(initialWorkspace.skills.some(item => item.name === 'chrome-extensions'))
         await assert.rejects(runtime.importSkill(skill), /valid SKILL.md/)
         await writeFile(path.join(skill, 'SKILL.md'), '---\nname: global-fixture\ndescription: Shared project instructions.\n---\nUse these global conventions.\n')
         const imported = await runtime.importSkill(skill)

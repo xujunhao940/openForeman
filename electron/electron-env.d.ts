@@ -23,6 +23,8 @@ declare namespace NodeJS {
 interface Window {
   agentAPI?: import('../shared/agent').AgentAPI
   menuAPI?: import('../shared/menu').MenuAPI
+  powerAPI?: import('../shared/power').PowerAPI
+  backgroundTasksAPI?: import('../shared/background-tasks').BackgroundTasksAPI
   ipcRenderer: import('electron').IpcRenderer
   providersAPI?: {
     readKey: (id: string) => Promise<string>

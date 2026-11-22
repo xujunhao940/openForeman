@@ -1,6 +1,7 @@
 import {useRef, useState} from "react"
-import {Cpu, Shield, PlugConnection as PlugZap} from "@gravity-ui/icons"
+import {CircleInfo, Cpu, Shield, PlugConnection as PlugZap} from "@gravity-ui/icons"
 import {Button} from "@/components/ui/button"
+import AboutSettings from "@/pages/settings/about"
 import ModelsSettings from "@/pages/settings/models.tsx"
 import PermissionsSettings from "@/pages/settings/permissions"
 import ProvidersSettings from "@/pages/settings/providers.tsx"
@@ -43,6 +44,7 @@ const sections = [
     {id: "models", label: "Models", icon: Cpu},
     {id: "providers", label: "Providers", icon: PlugZap},
     {id: "permissions", label: "Permissions", icon: Shield},
+    {id: "about", label: "About", icon: CircleInfo},
 ] as const
 
 function readSettings(): SettingsValues {
@@ -72,7 +74,7 @@ function readSettings(): SettingsValues {
 }
 
 export default function Settings() {
-    const [section, setSection] = useState<'models' | 'providers' | 'permissions'>("models")
+    const [section, setSection] = useState<(typeof sections)[number]['id']>("models")
     const [values, setValues] = useState(readSettings)
     const valuesRef = useRef(values)
     const [storageError, setStorageError] = useState('')
@@ -115,6 +117,7 @@ export default function Settings() {
                     {storageError && <p role="alert" className="settings-error">{storageError}</p>}
                     {section === "models" && <ModelsSettings values={values} update={update} />}
                     {section === "permissions" && <PermissionsSettings/>}
+                    {section === "about" && <AboutSettings/>}
                     <div hidden={section !== "providers"}><ProvidersSettings values={values} update={update} /></div>
                 </div>
             </section>

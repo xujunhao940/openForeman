@@ -18,7 +18,7 @@
   </p>
 </div>
 
-## Getting started
+## 🚀 Getting started
 
 **Requirements:** Node.js 22.19+ and Yarn 4.5.3.
 
@@ -36,7 +36,11 @@ Providers use the OpenAI Chat Completions protocol, including custom base URLs a
 
 The browser preview renders the UI and can preview plugin settings. File access and agent execution require Electron. Preview settings are separate from desktop runtime configuration.
 
-## Capabilities
+## 🧰 Capabilities
+
+### ⚡ Foreman Mode
+
+Foreman Mode overclocks parallel Subagents. Before investigating or answering, the main agent must launch at least two useful, independent, read-only research tasks in parallel, each with a distinct deliverable. The concurrency limit scales with reasoning effort: 3 at Low, 6 at Medium, 9 at High, and 12 at Xhigh. Child agents cannot delegate.
 
 All ten capabilities below ship as application code and remain part of the pi runtime. The **Plugins** page lists global Skills and MCP servers. Set default permissions in **Settings → Permissions**, or override permissions for the current conversation in the prompt input. Configuration changes take effect on the next run and are blocked while a run is active.
 
@@ -51,11 +55,24 @@ Project details open from a project row in the sidebar. The panel includes the p
 | Memory | Explicit per-project notes can be edited in the UI or through the permission-gated `memory` tool. Notes are injected into subsequent sessions. |
 | Web access | `web_fetch` retrieves public HTTP(S) text, HTML, or JSON. DNS is checked and pinned, redirects are revalidated, and requests have a 30-second timeout and 1 MiB response limit. It does not provide search-engine results or browser automation. |
 | MCP | Discovers and calls tools over stdio and Streamable HTTP. Configure servers in Plugins. Connections and calls require permission and are treated as mutating, so they are unavailable in Plan, Review, and Read only modes. |
+| Modern Web Guidance | Bundles Google's `modern-web-guidance` and `chrome-extensions` skills with local search and guide retrieval tools. Volatile and Origin Trial guides require explicit `.mwgrc` opt-in. |
 | Undo and redo | Restores workspace files between checkpoints after checking all affected paths for conflicts. Unrelated files are preserved. Controls appear at the end of an assistant response only when workspace files changed, and each response targets its own before and after snapshots. Requires Checkpoints and does not restore model conversation history. |
 | Review | A file browser shows staged and unstaged changes against HEAD, untracked file content, per-file counts, line numbers, and colored additions and deletions. Review with agent starts a read-only inspection. |
-| Skills | pi discovers project `.pi/skills`, `.agents/skills`, and explicitly registered global skill folders. Skills appear in the UI and pi system prompt. `/skill:name` invokes discovered instructions. Arbitrary project extension code is not loaded automatically. |
+| Skills | Includes the bundled Modern Web Guidance and Chrome Extensions skills, plus project `.pi/skills`, `.agents/skills`, and registered global skill folders. Skills appear in the UI and pi system prompt. `/skill:name` invokes discovered instructions. Arbitrary project extension code is not loaded automatically. |
 
-## Security and limits
+## 📊 Terminal-Bench snapshot
+
+Seven tasks · Same model and reasoning effort for both agents · `gpt-6.2-sol (xhigh)`
+
+![Total tokens by task. Foreman in yellow, Codex CLI in black.](benchmarks/terminal-bench/charts/total-tokens.png)
+
+![Agent execution time by task. Foreman in yellow, Codex CLI in black.](benchmarks/terminal-bench/charts/execution-time.png)
+
+![Task scores. Foreman in yellow, Codex CLI in black.](benchmarks/terminal-bench/charts/test-results.png)
+
+Details and reproduction instructions are in [`benchmarks/terminal-bench/README.md`](benchmarks/terminal-bench/README.md).
+
+## 🔐 Security and limits
 
 The shell is an approved local shell, not an OS sandbox. File tools validate project paths and symlinks. Approving a shell or MCP server can grant access outside the workspace. Read only blocks these operations. External network effects, shell changes outside the project, and MCP effects cannot be undone by file checkpoints.
 
@@ -63,7 +80,7 @@ Checkpoints stop if they encounter unsupported files rather than silently omitti
 
 Only one conversation can run per project directory at a time, preventing overlapping writes and restores. Other projects can run independently. Stop cancels the root session, children, and pending approvals. pi JSONL history resumes by project and chat after restart. The renderer stores visible messages in localStorage.
 
-## Architecture
+## 🏗️ Architecture
 
 | File | Responsibility |
 | --- | --- |
@@ -78,7 +95,7 @@ Only one conversation can run per project directory at a time, preventing overla
 
 Runtime configuration, workspace memory, checkpoints, and pi sessions live under Electron `userData/agent/`. Credentials should not be stored in project memory or MCP command arguments.
 
-## Verify and package
+## 🧪 Verify and package
 
 ```sh
 yarn typecheck
