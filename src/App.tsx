@@ -25,6 +25,7 @@ import {
 import {Button} from "@/components/ui/button"
 import {Input} from "@/components/ui/input"
 import {Label} from "@/components/ui/label"
+import {Checkbox} from "@/components/ui/checkbox"
 import {Collapsible, CollapsibleContent, CollapsibleTrigger} from "@/components/ui/collapsible"
 import {
     Dialog,
@@ -50,6 +51,7 @@ type ProjectChat = { workspaceMode?: WorkspaceMode; id: string; name: string; me
 
 const PROJECTS_STORAGE_KEY = "foreman_projects"
 const CHATS_STORAGE_KEY = "foreman_project_chats"
+const DISCLAIMER_ACKNOWLEDGMENT_KEY = "foreman_disclaimer_acknowledged_v1"
 const defaultProjects: ProjectEntry[] = []
 function summarizeChat(text: string) {
     const clean = text.replace(/\s+/g, ' ').trim()
@@ -100,6 +102,8 @@ export default function App() {
     })
     const [sleepControlSupported, setSleepControlSupported] = useState(false)
     const [detailsProjectId, setDetailsProjectId] = useState<string | null>(null)
+    const [disclaimerAcknowledged, setDisclaimerAcknowledged] = useState(() => localStorage.getItem(DISCLAIMER_ACKNOWLEDGMENT_KEY) === "true")
+    const [disclaimerConfirmed, setDisclaimerConfirmed] = useState(false)
     const activeProject = projects.find((project) => project.id === activeProjectId)
     const activeChats = activeProject ? (projectChats[activeProject.id] ?? []).filter(inMode) : []
     const activeChatId = activeProject ? activeChatIds[selectionKey(activeProject.id)] ?? activeChats.find(chat => !chat.archived)?.id : undefined
@@ -223,6 +227,34 @@ export default function App() {
     }
 
     return <TooltipProvider>
+        <Dialog open={!disclaimerAcknowledged}>
+            <DialogContent showCloseButton={false}>
+                <DialogHeader>
+                    <DialogTitle>Important Information</DialogTitle>
+                    <DialogDescription>Review these terms and data-security reminders before using Open Foreman.</DialogDescription>
+                </DialogHeader>
+                <div className="disclaimer-content">
+                    <section>
+                        <h3>Disclaimer</h3>
+                        <p>Open Foreman is provided “as is”, without warranties of any kind. AI-generated content and actions may be inaccurate or harmful. You are responsible for reviewing outputs, approving actions, and complying with applicable laws and third-party terms.</p>
+                    </section>
+                    <section>
+                        <h3>Data security</h3>
+                        <p>Prompts and project content may be sent to the AI providers and MCP servers you configure. Review their privacy and retention practices, avoid sharing sensitive information, and carefully review permissions before approving file, shell, or network access.</p>
+                    </section>
+                    <label className="disclaimer-confirmation">
+                        <Checkbox checked={disclaimerConfirmed} onCheckedChange={checked => setDisclaimerConfirmed(checked === true)} />
+                        <span>I have read and understand this disclaimer and data-security notice.</span>
+                    </label>
+                </div>
+                <DialogFooter>
+                    <Button disabled={!disclaimerConfirmed} onClick={() => {
+                        localStorage.setItem(DISCLAIMER_ACKNOWLEDGMENT_KEY, "true")
+                        setDisclaimerAcknowledged(true)
+                    }}>Continue</Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
         <SidebarProvider className="app-shell">
             <Sidebar className="sidebar">
                 <SidebarHeader className="sidebar-brand">

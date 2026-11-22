@@ -10,7 +10,8 @@
   "files": [
     "dist",
     "dist-electron",
-    "icons/Foreman.png"
+    "icons/Foreman.png",
+    "LICENSE"
   ],
   "mac": {
     "icon": "icons/Foreman-mac.icns",

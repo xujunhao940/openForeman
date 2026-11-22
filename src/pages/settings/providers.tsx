@@ -61,7 +61,7 @@ export default function ProvidersSettings({values, update}: SettingsPageProps) {
         setError('')
         setStatus('')
         try {
-            const models = await fetchProviderModels(provider.id, provider.baseUrl)
+            const models = await fetchProviderModels(provider)
             if (!mounted.current) return
             update('providers', values.providers.map((item) => item.id === provider.id ? {...item, models} : item))
             setStatus(`${models.length} models fetched from ${provider.name}. Available in Models.`)
@@ -87,9 +87,9 @@ export default function ProvidersSettings({values, update}: SettingsPageProps) {
         </div>
         {error && <p role="alert" className="settings-error">{error}</p>}
         {status && <p role="status" className="settings-list-summary">{status}</p>}
-        {values.providers.length === 0 && <div className="settings-empty-state"><p>No providers yet</p><span>Add OpenAI or a custom OpenAI-compatible provider to get started.</span></div>}
+        {values.providers.length === 0 && <div className="settings-empty-state"><p>No providers yet</p><span>Add an OpenAI, Anthropic, or custom provider to get started.</span></div>}
         {values.providers.map((provider) => <div className="provider-setting" key={provider.id}>
-            <div className="provider-setting-heading"><h2>{provider.name}</h2><span>{provider.preset === 'openai' ? 'OpenAI' : 'Custom'} · {provider.models.length} models</span></div>
+            <div className="provider-setting-heading"><h2>{provider.name}</h2><span>{provider.preset === 'openai' ? 'OpenAI Responses' : provider.preset === 'anthropic' ? 'Anthropic' : 'OpenAI Responses compatible'} · {provider.models.length} models</span></div>
             <p className="provider-base-url">{provider.baseUrl}</p>
             <div className="provider-actions">
                 <Button variant="outline" size="sm" disabled={!!busy} onClick={() => fetchModels(provider)}>{busy === provider.id ? 'Working…' : 'Fetch Models'}</Button>
@@ -100,22 +100,22 @@ export default function ProvidersSettings({values, update}: SettingsPageProps) {
         <p className="settings-security-note">{window.providersAPI ? 'API keys are encrypted using your system’s secure storage.' : 'Browser preview: API keys are kept only for this session. Provider settings and models are saved locally.'}</p>
         <Dialog open={!!draft} onOpenChange={(open) => {if (!open && !busy) {setDraft(null); setApiKey('')}}}>
             {draft && <DialogContent className="provider-dialog"><form onSubmit={save}>
-                <DialogHeader><DialogTitle>{values.providers.some((item) => item.id === draft.id) ? 'Edit Provider' : 'Add Provider'}</DialogTitle><DialogDescription>Use the OpenAI preset or connect an OpenAI-compatible API.</DialogDescription></DialogHeader>
+                <DialogHeader><DialogTitle>{values.providers.some((item) => item.id === draft.id) ? 'Edit Provider' : 'Add Provider'}</DialogTitle><DialogDescription>Connect to OpenAI Responses, Anthropic Messages, or a compatible API.</DialogDescription></DialogHeader>
                 <fieldset className="provider-form-fields" disabled={!!busy}><legend className="sr-only">Provider connection</legend>
                     <div className="provider-form-group">
                         <Field><FieldLabel htmlFor="provider-preset">Preset</FieldLabel>
-                            <Select value={draft.preset} items={[{value: 'openai', label: 'OpenAI'}, {value: 'custom', label: 'Custom'}]} onValueChange={(preset) => {
-                                if (preset !== 'openai' && preset !== 'custom') return
-                                setDraft({...draft, preset, name: preset === 'openai' ? 'OpenAI' : '', baseUrl: preset === 'openai' ? 'https://api.openai.com/v1' : ''})
+                            <Select value={draft.preset} items={[{value: 'openai', label: 'OpenAI Responses'}, {value: 'anthropic', label: 'Anthropic'}, {value: 'custom', label: 'Custom (Responses)'}]} onValueChange={(preset) => {
+                                if (preset !== 'openai' && preset !== 'anthropic' && preset !== 'custom') return
+                                setDraft({...draft, preset, name: preset === 'openai' ? 'OpenAI' : preset === 'anthropic' ? 'Anthropic' : '', baseUrl: preset === 'openai' ? 'https://api.openai.com/v1' : preset === 'anthropic' ? 'https://api.anthropic.com/v1' : ''})
                                 setApiKey('')
                             }}>
                                 <SelectTrigger id="provider-preset"><SelectValue /></SelectTrigger>
-                                <SelectContent><SelectGroup><SelectItem value="openai">OpenAI</SelectItem><SelectItem value="custom">Custom</SelectItem></SelectGroup></SelectContent>
+                                <SelectContent><SelectGroup><SelectItem value="openai">OpenAI Responses</SelectItem><SelectItem value="anthropic">Anthropic</SelectItem><SelectItem value="custom">Custom (Responses)</SelectItem></SelectGroup></SelectContent>
                             </Select>
                         </Field>
                         <Field><FieldLabel htmlFor="provider-name">Name</FieldLabel><Input id="provider-name" value={draft.name} onChange={(event) => setDraft({...draft, name: event.target.value})} placeholder="My provider" required maxLength={100} /></Field>
                         <Field><FieldLabel htmlFor="provider-base-url">Base URL</FieldLabel><Input id="provider-base-url" type="url" value={draft.baseUrl} onChange={(event) => setDraft({...draft, baseUrl: event.target.value})} placeholder="https://api.example.com/v1" required aria-describedby="provider-url-help" /><p id="provider-url-help" className="provider-field-help">Models are fetched from your base URL + /models.</p></Field>
-                        <Field><FieldLabel htmlFor="provider-api-key">API key{draft.preset === 'custom' ? ' (optional)' : ''}</FieldLabel><Input id="provider-api-key" type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="sk-..." required={draft.preset === 'openai'} /></Field>
+                        <Field><FieldLabel htmlFor="provider-api-key">API key{draft.preset === 'custom' ? ' (optional)' : ''}</FieldLabel><Input id="provider-api-key" type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="sk-..." required={draft.preset !== 'custom'} /></Field>
                     </div>
                 </fieldset>
                 {formError && <p role="alert" className="settings-error">{formError}</p>}

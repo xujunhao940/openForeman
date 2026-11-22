@@ -32,7 +32,7 @@ yarn dev
 3. 在 **Settings → Models** 中启用模型，然后在聊天输入框中选择它。
 4. 选择 **Build**、**Plan** 或 **Review** 模式并发送消息，在对话中审批智能体请求的操作。
 
-Provider 使用 OpenAI Chat Completions 协议，支持自定义 Base URL 和无需密钥的本地端点。API Key 保存在 Electron 系统加密的凭据存储中，并通过内存中的认证覆盖配置传递给 pi。密钥不会经过智能体 IPC 传输，也不会写入 pi 的认证文件。为兼容更多模型，推理功能默认关闭。上下文和输出长度采用保守默认值，分别为 128k 和 16k token，不读取 Provider 元数据。
+OpenAI 和自定义 Provider 使用 OpenAI Responses 协议，Anthropic Provider 使用 Anthropic Messages API。支持自定义 Base URL，自定义 OpenAI 兼容端点也可以不填写 API Key。API Key 保存在 Electron 系统加密的凭据存储中，并通过内存中的认证覆盖配置传递给 pi。密钥不会经过智能体 IPC 传输，也不会写入 pi 的认证文件。为兼容更多模型，推理功能默认关闭。上下文和输出长度采用保守默认值，分别为 128k 和 16k token，不读取 Provider 元数据。
 
 浏览器预览可渲染界面和预览插件设置。文件访问和智能体运行需要 Electron。预览中的设置与桌面运行时配置相互独立。
 
@@ -62,7 +62,7 @@ Foreman Mode 会为并行 Subagents“超频”。主智能体在自行调查或
 
 ## 📊 Terminal-Bench 实测
 
-七项任务 · 两边使用相同模型和推理强度 · `gpt-6.2-sol (xhigh)`
+六项任务 · 双方使用相同模型和推理强度 · `gpt-6.2-sol (xhigh)`
 
 ![各任务总 token，Foreman 为黄色，Codex CLI 为黑色。](benchmarks/terminal-bench/charts/total-tokens.png)
 

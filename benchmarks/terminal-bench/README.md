@@ -33,24 +33,30 @@ curl "http://127.0.0.1:9336/events?runId=RETURNED_RUN_ID" \
 
 Harbor needs an adapter to call this API and connect the isolated task environment. `foreman_terminal_agent.py` performs that wiring. `foreman_mcp_bridge.mjs` exposes environment commands through MCP. The adapter starts the packaged application, creates a fresh scratch workspace and saves events, model usage and configuration in each trial's agent logs.
 
-The paired runs use the `CUSTOM` provider with `gpt-6.2-sol` at `xhigh`, a 256k context window and one trial at a time. Foreman runs through its local HTTP compatibility API and uses `mcpOnly` to connect Harbor's isolated task environment. This disables Subagents and Foreman Mode. Foreman was retested after runtime optimizations. Codex retains its original paired-run data and was not rerun.
+The paired runs use the `CUSTOM` provider and the same base URL and API credential, with `gpt-6.2-sol (xhigh)`, a 256k context window, Apple Container, one trial at a time and identical task data. Foreman runs through its local HTTP compatibility API with `mcpOnly` to connect Harbor's isolated task environment. This disables Subagents and Foreman Mode. Both agents were rerun for this comparison.
 
-### Retest results
+### Paired retest results
 
-| Task | Agent and run | Input tokens, including cache | Cached input, subset | Output tokens | Agent time | Harbor reward or test result |
+| Task | Agent | Input tokens, including cache | Cached input, subset | Output tokens | Agent time | Test result |
 | --- | --- | ---: | ---: | ---: | ---: | --- |
-| `fix-code-vulnerability` | Foreman retest | 411,659 | 351,872 | 5,271 | 119.43 s | Harbor reward 1.0 |
-| `fix-code-vulnerability` | Codex original | 353,375 | 310,016 | 4,059 | 126.83 s | Harbor reward 1.0 |
-| `regex-log` | Foreman retest | 37,082 | 23,680 | 3,931 | 33.36 s | Original task test passed |
-| `regex-log` | Codex original | 427,256 | 378,456 | 5,198 | 131.30 s | Original task test passed |
+| `fix-code-vulnerability` | Foreman | 147,318 | 51,707 | 2,695 | 91.55 s | 1.0 |
+| `fix-code-vulnerability` | Codex CLI | 228,283 | 123,852 | 2,145 | 95.21 s | 1.0 |
+| `regex-log` | Foreman | 55,667 | 3,196 | 4,014 | 110.45 s | Original task test passed |
+| `regex-log` | Codex CLI | 119,566 | 67,920 | 3,891 | 108.86 s | Original task test passed |
+| `polyglot-c-py` | Foreman | 121,021 | 25,234 | 4,091 | 144.65 s | Original task test passed |
+| `polyglot-c-py` | Codex CLI | 425,128 | 247,202 | 6,652 | 227.03 s | 1.0 |
+| `event-summary` | Foreman | 28,647 | 1,015 | 4,250 | 103.36 s | 1.0 |
+| `event-summary` | Codex CLI | 122,989 | 58,463 | 6,100 | 160.26 s | 1.0 |
+| `interval-index` | Foreman | 27,403 | 0 | 1,803 | 54.53 s | 1.0 |
+| `interval-index` | Codex CLI | 114,776 | 73,601 | 2,972 | 109.14 s | 1.0 |
+| `recurrence-expander` | Foreman | 49,040 | 4,207 | 7,693 | 180.82 s | 1.0 |
+| `recurrence-expander` | Codex CLI | 251,726 | 172,581 | 11,523 | 288.85 s | 1.0 |
 
-Across the two original paired tasks, Foreman used 457,943 total tokens and 152.79 seconds, compared with 789,888 tokens and 258.13 seconds for Codex. Total tokens are input plus output. The quality chart shows each task’s pass status, using the Harbor verifier for `fix-code-vulnerability` and the original task assertions for `regex-log`. Both agents passed those two tasks. On `fix-code-vulnerability` alone, Foreman used 416,930 total tokens and Codex used 357,434.
+The charts show six tasks. `biped-contact-dynamics` is excluded because both agents hit the 720-second agent timeout, so it has no valid token totals and is not a useful paired runtime measurement. `regex-log` verifier execution timed out for both runs, and the `polyglot-c-py` Foreman verifier could not install its runner. Both `regex-log` outputs passed the original `tests/test_outputs.py` on the host. The Foreman `polyglot-c-py` output passed that original test on the host, and Codex received Harbor reward 1.0. The other four tasks received Harbor reward 1.0 for both agents.
 
-Input tokens already include cached input. Do not add the cached-input column to that value. The Foreman adapter reports `input + cacheRead + cacheWrite`, while the Codex adapter reports the CLI's `input_tokens`, which already includes cached tokens.
+Across the six charted tasks, Foreman used 453,642 tokens and 685.36 seconds. Codex used 1,295,751 tokens and 989.35 seconds. Foreman was faster on five tasks and slower on `regex-log` by 1.58 seconds. Both agents passed every charted task.
 
-The `regex-log` Harbor verifier could not run pytest in either original run because pytest was unavailable after dependency setup failed. The verifier recorded reward 0.0 for Codex and timed out for the Foreman retest. Both saved regexes were recovered from their tool logs and passed the task's original `tests/test_outputs.py`. The test source was unchanged. Only the expected `/app/regex.txt` path was redirected to the recovered regex file for this direct test.
-
-Harbor returned `cost_usd: null` for every run, so dollar cost is unavailable. Agent time excludes verifier time. The original comparison covers two tasks.
+Total tokens are input plus output. Input tokens already include cached input, so the cached-input column is a subset and must not be added again. The Foreman adapter reports input plus cache-read and cache-write tokens. The Codex adapter reports the CLI's `input_tokens`, which includes cached tokens. The same base URL, credential, model and effort were configured, and both runtimes use the provider's Responses endpoint. Token values are the usage counters each runtime reported and are not independently reconciled against provider billing records. Agent time excludes verifier time. Harbor returned `cost_usd: null`, so dollar cost is unavailable.
 
 Install Harbor separately and configure `FOREMAN_PROVIDER_ID` and `FOREMAN_PROVIDER_URL` for your saved provider. Set `FOREMAN_APP` to override the packaged executable path. `node` must be on PATH and project npm dependencies must be installed.
 
@@ -64,34 +70,24 @@ PYTHONPATH="$PWD/benchmarks/terminal-bench" FOREMAN_BENCH_EFFORT=xhigh harbor ru
   --jobs-dir /path/to/foreman_benchmark --job-name foreman-gpt-6.2-sol-xhigh --yes
 ```
 
-Set `FOREMAN_PROVIDER_ID` and `FOREMAN_PROVIDER_URL` in the environment before running. For Codex, use `codex_terminal_agent:CodexTerminalBench` and a temporary `CODEX_HOME`. Set `CODEX_BENCH_BASE_URL` to the same provider URL and supply the same key through `CODEX_BENCH_API_KEY`. The Codex adapter uses the provider’s Responses endpoint. Foreman uses its Chat Completions endpoint. GPU-dependent tasks require a compatible environment. Benchmark datasets and trial outputs belong outside this source directory.
+Set `FOREMAN_PROVIDER_ID` and `FOREMAN_PROVIDER_URL` in the environment before running. For Codex, use `codex_terminal_agent:CodexTerminalBench` and a temporary `CODEX_HOME`. Set `CODEX_BENCH_BASE_URL` to the same provider URL and supply the same key through `CODEX_BENCH_API_KEY`. Both adapters use the provider’s Responses endpoint. GPU-dependent tasks require a compatible environment. Benchmark datasets and trial outputs belong outside this source directory.
 
-### Additional paired runs
+The local tasks award equal credit per passing case. Both agents passed all cases: 10/10 for `event-summary`, 10/10 for `interval-index`, and 13/13 for `recurrence-expander`.
 
-The five additional tasks used the same CUSTOM provider URL and API credential for both agents, with `gpt-6.2-sol (xhigh)`, a 256k context window, Apple Container, and the same task instructions and verifiers. The Foreman recurrence result is from the earlier run with this credential. The remaining Foreman results and all five Codex results are from the new runs. The original two task pairs are historical measurements.
+The adapter waits up to one second for the initial command result and up to five seconds per poll. Token counts and elapsed times are taken from each run's agent result and usage metadata.
 
-| Task | Agent | Input tokens, including cache | Cached input | Output tokens | Agent time | Test result |
-| --- | --- | ---: | ---: | ---: | ---: | --- |
-| `polyglot-c-py` | Foreman | 134,739 | 105,088 | 10,554 | 148.44 s | Original task test passed on recovered file |
-| `polyglot-c-py` | Codex CLI | 627,914 | 572,160 | 17,336 | 250.06 s | Original task test passed on recovered file |
-| `event-summary` | Foreman | 45,944 | 33,664 | 14,666 | 140.55 s | 1.0 |
-| `event-summary` | Codex CLI | 328,861 | 290,176 | 23,882 | 235.97 s | 1.0 |
-| `interval-index` | Foreman | 37,525 | 23,680 | 5,271 | 42.19 s | 1.0 |
-| `interval-index` | Codex CLI | 219,417 | 167,552 | 3,219 | 55.72 s | 1.0 |
-| `recurrence-expander` | Foreman | 151,412 | 129,024 | 14,310 | 182.50 s | 1.0 |
-| `recurrence-expander` | Codex CLI | 392,011 | 355,840 | 15,776 | 174.51 s | 1.0 |
+## Benchmark analysis
 
-The Foreman `polyglot-c-py` Harbor verifier could not download the test runner and recorded 0.0. Codex passed the Harbor verifier. Both recovered files also passed the same original task assertion in a separate run. The chart uses that paired assertion result.
+Across six paired tasks using the same `CUSTOM` provider base URL, API credential, and `gpt-6.2-sol (xhigh)` configuration, Foreman reported **453,642 tokens** and **685.36 seconds** of agent execution time. Codex CLI reported **1,295,751 tokens** and **989.35 seconds**. Both agents passed all six task tests.
 
-The three local tasks award equal credit per passing case. Both agents passed all cases: 10/10 for `event-summary`, 10/10 for `interval-index`, and 13/13 for `recurrence-expander`.
+### Why the reported token totals differ
 
-### Tool calls
+Cached input accounted for 658,260 of the 842,109 tokens separating the two totals, or about **78% of the gap**. Input totals count tokens across model requests. When a new request includes earlier instructions, conversation history, or tool results, those tokens can be counted again even when the provider serves them from cache. After subtracting the reported cached input from each total, the comparison drops from **2.86× to 1.50×**, with 552,132 tokens for Codex CLI and 368,283 for Foreman. The adjusted figures still include output tokens. Codex CLI reported 33,283 output tokens and Foreman reported 24,546.
 
-| Task | Foreman original commands / polls | Codex recorded commands / polls | Foreman retest commands / polls |
-| --- | ---: | ---: | ---: |
-| `fix-code-vulnerability` | 22 / 23 | 14 / 14 | 9 / 3 |
-| `regex-log` | 7 / 7 | 5 / 5 | 3 / 0 |
+### Why elapsed time differs
 
-The original adapters returned a job ID for every command. Retrieving even a short command's output required another tool call. The adapters now wait briefly for command completion before returning, which avoids many polling rounds.
+The logs show 58 terminal commands and 16 polls for Codex CLI, compared with 30 commands and nine polls for Foreman. Each additional command or poll can add tool execution or waiting time and may require another model call. On `polyglot-c-py`, Codex CLI set up temporary toolchains and checked 159 reference values. Foreman checked 10 valid inputs and four invalid inputs. Both passed the original task test. On `regex-log`, both agents executed six terminal commands, and Codex CLI finished 1.58 seconds sooner despite reporting about twice as many tokens. Agent execution time excludes the benchmark verifier.
 
-The shared adapter waits up to one second for the initial result and up to five seconds per poll. Token counts and elapsed times in the retest table are from model runs. Tool calls above are counted from each run's event logs.
+### What the comparison measures
+
+Foreman and Codex CLI use the provider's Responses endpoint. The token totals come from each runtime's usage counters. Provider billing records and per-request timing were unavailable, so this run cannot isolate how much of the gap comes from context handling, endpoint accounting, model latency, or tool execution. The figures describe one paired run per task under this setup.

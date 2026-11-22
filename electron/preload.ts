@@ -43,7 +43,7 @@ contextBridge.exposeInMainWorld('providersAPI', {
   readKey: (id: string) => ipcRenderer.invoke('providers:read-key', id),
   saveKey: (id: string, key: string) => ipcRenderer.invoke('providers:save-key', id, key),
   deleteKey: (id: string) => ipcRenderer.invoke('providers:delete-key', id),
-  fetchModels: (id: string, baseUrl: string) => ipcRenderer.invoke('providers:fetch-models', id, baseUrl),
+  fetchModels: (id: string, baseUrl: string, preset: 'openai' | 'anthropic' | 'custom') => ipcRenderer.invoke('providers:fetch-models', id, baseUrl, preset),
 })
 
 const powerAPI: PowerAPI = {

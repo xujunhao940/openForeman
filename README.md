@@ -32,7 +32,7 @@ yarn dev
 3. Enable a model in **Settings → Models**, then select it in the chat composer.
 4. Choose **Build**, **Plan**, or **Review**, send a message, and approve requested actions in the conversation.
 
-Providers use the OpenAI Chat Completions protocol, including custom base URLs and local keyless endpoints. API keys are stored in Electron's system-encrypted credential store and passed to pi through in-memory auth overrides. They are not sent through agent IPC or written to pi auth files. Reasoning is off by default for compatibility. Context and output limits use conservative defaults of 128k and 16k tokens rather than provider metadata.
+OpenAI and custom providers use the OpenAI Responses protocol. Anthropic providers use the Anthropic Messages API. Providers support custom base URLs, and custom OpenAI-compatible endpoints may omit an API key. API keys are stored in Electron's system-encrypted credential store and passed to pi through in-memory auth overrides. They are not sent through agent IPC or written to pi auth files. Reasoning is off by default for compatibility. Context and output limits use conservative defaults of 128k and 16k tokens rather than provider metadata.
 
 The browser preview renders the UI and can preview plugin settings. File access and agent execution require Electron. Preview settings are separate from desktop runtime configuration.
 
@@ -62,7 +62,7 @@ Project details open from a project row in the sidebar. The panel includes the p
 
 ## 📊 Terminal-Bench snapshot
 
-Seven tasks · Same model and reasoning effort for both agents · `gpt-6.2-sol (xhigh)`
+Six tasks · Same model and reasoning effort for both agents · `gpt-6.2-sol (xhigh)`
 
 ![Total tokens by task. Foreman in yellow, Codex CLI in black.](benchmarks/terminal-bench/charts/total-tokens.png)
 
@@ -70,7 +70,7 @@ Seven tasks · Same model and reasoning effort for both agents · `gpt-6.2-sol (
 
 ![Task scores. Foreman in yellow, Codex CLI in black.](benchmarks/terminal-bench/charts/test-results.png)
 
-Details and reproduction instructions are in [`benchmarks/terminal-bench/README.md`](benchmarks/terminal-bench/README.md).
+See [`benchmarks/terminal-bench/README.md`](benchmarks/terminal-bench/README.md) for details.
 
 ## 🔐 Security and limits
 

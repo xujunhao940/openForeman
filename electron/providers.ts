@@ -55,9 +55,10 @@ export function registerProviderHandlers() {
         validateId(id)
         return changeCredentials(id)
     })
-    ipcMain.handle('providers:fetch-models', async (_event, id: unknown, baseUrl: unknown) => {
+    ipcMain.handle('providers:fetch-models', async (_event, id: unknown, baseUrl: unknown, preset: unknown) => {
         validateId(id)
         if (typeof baseUrl !== 'string') throw new Error('Invalid base URL.')
-        return requestModels(baseUrl, await readKey(id))
+        if (preset !== 'openai' && preset !== 'anthropic' && preset !== 'custom') throw new Error('Invalid provider preset.')
+        return requestModels(baseUrl, await readKey(id), preset)
     })
 }

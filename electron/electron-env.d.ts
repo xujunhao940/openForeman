@@ -30,6 +30,6 @@ interface Window {
     readKey: (id: string) => Promise<string>
     saveKey: (id: string, key: string) => Promise<void>
     deleteKey: (id: string) => Promise<void>
-    fetchModels: (id: string, baseUrl: string) => Promise<string[]>
+    fetchModels: (id: string, baseUrl: string, preset: 'openai' | 'anthropic' | 'custom') => Promise<string[]>
   }
 }

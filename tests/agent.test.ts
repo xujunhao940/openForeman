@@ -181,12 +181,11 @@ test('pi runtime streams actual SDK events, gates writes, persists sessions, and
         try {
             let raw = ''; for await (const part of req) raw += part
             const body = JSON.parse(raw); requests.push(body)
-            const messages = body.messages
-            const lastUser = messages.map((message: {role: string}) => message.role).lastIndexOf('user')
-            const text = JSON.stringify(messages[lastUser]?.content)
-            const reviewingAction = messages.some((message: {role: string; content: unknown}) => message.role === 'system' && JSON.stringify(message.content).includes('You review proposed tool actions'))
-            const alreadyCalled = messages.slice(lastUser + 1).some((message: {role: string}) => message.role === 'tool')
-            const foremanMode = messages.some((message: {role: string; content: unknown}) => message.role === 'system' && JSON.stringify(message.content).includes('Foreman Mode is enabled'))
+            const input = body.input
+            const text = JSON.stringify(input)
+            const reviewingAction = text.includes('You review proposed tool actions')
+            const alreadyCalled = input.some((item: {type: string}) => item.type === 'function_call_output')
+            const foremanMode = text.includes('Foreman Mode is enabled')
             const write = /WRITE/.test(text)
             const plan = /PLAN/.test(text)
             const delegate = /DELEGATE/.test(text)
@@ -199,16 +198,16 @@ test('pi runtime streams actual SDK events, gates writes, persists sessions, and
             }
             const pageTask = text.includes('READ_PAGED_RESULT')
             const catalogTask = text.includes('Find a record in the library')
-            const toolNames = body.tools?.map((tool: {function: {name: string}}) => tool.function.name) ?? []
-            const catalogStep = messages.slice(lastUser + 1).filter((message: {role: string}) => message.role === 'tool').length
+            const toolNames = body.tools?.map((tool: {name: string}) => tool.name) ?? []
+            const catalogStep = input.filter((item: {type: string}) => item.type === 'function_call_output').length
             const lookup = 'mcp_library_lookup_3'
             const load = catalogTask && !alreadyCalled && !toolNames.includes(lookup)
             const callLookup = catalogTask && toolNames.includes(lookup) && catalogStep < 2
-                && !messages.slice(lastUser + 1).some((m: {role: string; content: string}) => m.role === 'tool' && JSON.stringify(m.content).includes('record 3'))
+                && !input.some((item: {type: string; output?: string}) => item.type === 'function_call_output' && JSON.stringify(item.output).includes('record 3'))
             const readingPage = pageTask && catalogStep === 1 && toolNames.includes('read_tool_output')
-            const readCall = readingPage ? messages.findLast((m: {role: string}) => m.role === 'tool') : undefined
+            const readCall = readingPage ? input.findLast((item: {type: string}) => item.type === 'function_call_output') : undefined
             const tool = pageTask && !alreadyCalled ? {name: 'read', arguments: JSON.stringify({path: 'large.txt'})}
-                : readingPage ? {name: 'read_tool_output', arguments: JSON.stringify({callId: readCall.tool_call_id, block: 0, offset: 6000})}
+                : readingPage ? {name: 'read_tool_output', arguments: JSON.stringify({callId: readCall.call_id, block: 0, offset: 6000})}
                 : load ? {name: 'load_mcp_tools', arguments: JSON.stringify({names: [lookup]})}
                 : callLookup ? {name: lookup, arguments: '{}'}
                 : childResearch ? {name: 'read', arguments: JSON.stringify({path: 'README.md'})}
@@ -217,20 +216,38 @@ test('pi runtime streams actual SDK events, gates writes, persists sessions, and
                 : delegateNow ? {name: 'subagent', arguments: JSON.stringify(text.includes('SOLO') ? {task: questions[0]} : {tasks: text.includes('SINGLE') ? questions.slice(0, 1) : text.includes('DUPLICATE') ? [questions[0], questions[0]] : questions})}
                 : readGlobal ? {name: 'read', arguments: JSON.stringify({path: path.join(root, 'global-skill', 'SKILL.md')})} : null
             res.writeHead(200, {'content-type': 'text/event-stream', 'cache-control': 'no-cache'})
-            const chunk = (delta: unknown, finish_reason: string | null = null) => res.write(`data: ${JSON.stringify({id: 'chatcmpl-test', object: 'chat.completion.chunk', created: 1, model: 'mock-model', choices: [{index: 0, delta, finish_reason}]})}\n\n`)
-            chunk({role: 'assistant'})
+            const event = (type: string, value: unknown) => res.write(`event: ${type}\ndata: ${JSON.stringify({type, ...value as object})}\n\n`)
+            const response = {id: 'resp-test', object: 'response', created_at: 1, status: 'completed', error: null, incomplete_details: null, instructions: null, max_output_tokens: null, model: 'mock-model', output: [], parallel_tool_calls: true, previous_response_id: null, reasoning: {effort: null, summary: null}, store: false, temperature: 1, text: {format: {type: 'text'}}, tool_choice: 'auto', tools: [], top_p: 1, truncation: 'disabled', usage: {input_tokens: 10, input_tokens_details: {cached_tokens: 0}, output_tokens: 3, output_tokens_details: {reasoning_tokens: 0}, total_tokens: 13}, metadata: {}}
             if (reviewingAction) {
-                chunk({content: /WRITE_REVIEW_ASK/.test(text) ? 'ASK' : 'APPROVE'}); chunk({}, 'stop')
+                const answer = /WRITE_REVIEW_ASK/.test(text) ? 'ASK' : 'APPROVE'
+                const item = {id: 'msg-review', type: 'message', role: 'assistant', status: 'completed', content: [{type: 'output_text', text: answer, annotations: []}]}
+                event('response.output_item.added', {output_index: 0, item})
+                event('response.content_part.added', {item_id: item.id, output_index: 0, content_index: 0, part: {type: 'output_text', text: '', annotations: []}})
+                event('response.output_text.delta', {item_id: item.id, output_index: 0, content_index: 0, delta: answer})
+                event('response.output_item.done', {output_index: 0, item})
             } else if (tool && (!alreadyCalled || callLookup || readingPage)) {
-                if (childResearch) chunk({content: 'Unverified preliminary hypothesis'})
-                chunk({tool_calls: [{index: 0, id: `call_${Date.now()}`, type: 'function', function: tool}]})
-                chunk({}, 'tool_calls')
+                const callId = `call_${Date.now()}`
+                const item = {id: `fc_${callId}`, type: 'function_call', call_id: callId, name: tool.name, arguments: tool.arguments, status: 'completed'}
+                event('response.output_item.added', {output_index: 0, item: {...item, arguments: ''}})
+                event('response.function_call_arguments.delta', {item_id: item.id, output_index: 0, delta: tool.arguments})
+                event('response.function_call_arguments.done', {item_id: item.id, output_index: 0, arguments: tool.arguments})
+                event('response.output_item.done', {output_index: 0, item})
             } else if (text.includes('STREAM_PROBE')) {
-                for (let i = 0; i < 120; i++) chunk({content: 'a'})
-                chunk({}, 'stop')
-            } else { chunk({content: 'Verified pi response'}); chunk({}, 'stop') }
-            res.write(`data: ${JSON.stringify({choices: [], usage: {prompt_tokens: 10, completion_tokens: 3, total_tokens: 13}})}\n\n`)
-            res.end('data: [DONE]\n\n')
+                const item = {id: 'msg-stream', type: 'message', role: 'assistant', status: 'completed', content: [{type: 'output_text', text: 'a'.repeat(120), annotations: []}]}
+                event('response.output_item.added', {output_index: 0, item})
+                event('response.content_part.added', {item_id: item.id, output_index: 0, content_index: 0, part: {type: 'output_text', text: '', annotations: []}})
+                for (let i = 0; i < 120; i++) event('response.output_text.delta', {item_id: item.id, output_index: 0, content_index: 0, delta: 'a'})
+                event('response.output_item.done', {output_index: 0, item})
+            } else {
+                const item = {id: 'msg-result', type: 'message', role: 'assistant', status: 'completed', content: [{type: 'output_text', text: 'Verified pi response', annotations: []}]}
+                event('response.output_item.added', {output_index: 0, item})
+                event('response.content_part.added', {item_id: item.id, output_index: 0, content_index: 0, part: {type: 'output_text', text: '', annotations: []}})
+                event('response.output_text.delta', {item_id: item.id, output_index: 0, content_index: 0, delta: 'Verified pi response'})
+                event('response.output_item.done', {output_index: 0, item})
+            }
+            response.output = []
+            event('response.completed', {response})
+            res.end()
         } catch (error) { res.writeHead(500); res.end(String(error)) }
     })
     server.listen(0, '127.0.0.1'); await once(server, 'listening')
@@ -337,9 +354,9 @@ test('pi runtime streams actual SDK events, gates writes, persists sessions, and
         await runtime.dispose()
         runtime = new AgentRuntime(dataDir, event => { events.push(event); if (event.type === 'permission') runtime.approve(event.request.id, approve) }, async () => 'test-key')
         await run(request('chat-1', 'Continue this conversation'))
-        const lastRequest = requests[requests.length - 1] as {messages: {role: string; content: unknown}[]}
-        assert.ok(lastRequest.messages.filter(message => message.role === 'user').length >= 2, 'pi history resumed from disk')
-        assert.ok(JSON.stringify(lastRequest.messages).includes('Project conventions persist.'))
+        const lastRequest = requests[requests.length - 1] as {input: {role?: string; content?: unknown}[]}
+        assert.ok(lastRequest.input.filter(message => message.role === 'user').length >= 2, 'pi history resumed from disk')
+        assert.ok(JSON.stringify(lastRequest.input).includes('Project conventions persist.'))
         const readonly = await run(request('chat-plan', 'WRITE', 'plan'))
         assert.ok(readonly.some(event => event.type === 'tool' && event.tool.state === 'error' && event.tool.output?.includes('Read-only')))
         assert.ok(!readonly.some(event => event.type === 'permission'))
@@ -394,8 +411,8 @@ test('pi runtime streams actual SDK events, gates writes, persists sessions, and
         const next = config(); next.plugins['web-access'] = false; next.plugins.subagents = false; next.plugins.skills = false
         await runtime.saveConfig(next)
         await run(request('chat-plugins', 'Hello'))
-        const tools = requests[requests.length - 1].tools as {function: {name: string}}[]
-        assert.ok(!tools.some(tool => ['web_fetch', 'subagent'].includes(tool.function.name)))
+        const tools = requests[requests.length - 1].tools as {name: string}[]
+        assert.ok(!tools.some(tool => ['web_fetch', 'subagent'].includes(tool.name)))
         const catalogConfig = config()
         catalogConfig.mcpServers = [{id: 'library', name: 'Library', enabled: true, transport: 'stdio', command: process.execPath,
             args: [path.resolve('tests/fixtures/mcp-server.mjs'), '--catalog']}]
@@ -403,12 +420,12 @@ test('pi runtime streams actual SDK events, gates writes, persists sessions, and
         await run({...request('catalog', 'Find a record in the library'), permissionMode: 'auto'}, {config: catalogConfig})
         console.log('Large MCP catalog first request bytes', Buffer.byteLength(JSON.stringify(requests[catalogStart])))
         console.log('Large MCP catalog task requests / bytes', requests.length - catalogStart, Buffer.byteLength(JSON.stringify(requests.slice(catalogStart))))
-        const requestToolNames = (index: number) => (requests[index].tools as {function: {name: string}}[]).map(tool => tool.function.name)
+        const requestToolNames = (index: number) => (requests[index].tools as {name: string}[]).map(tool => tool.name)
         assert.ok(requestToolNames(catalogStart).includes('load_mcp_tools'))
         assert.ok(!requestToolNames(catalogStart).includes('mcp_library_lookup_3'))
         assert.ok(requestToolNames(catalogStart + 1).includes('mcp_library_lookup_3'))
         assert.ok(!requestToolNames(catalogStart + 1).includes('mcp_library_lookup_4'))
-        assert.match(JSON.stringify(requests.at(-1)?.messages), /record 3/)
+        assert.match(JSON.stringify(requests.at(-1)?.input), /record 3/)
         const namedStart = requests.length
         await run({...request('catalog-named', 'Find a record in the library using mcp_library_lookup_3'), permissionMode: 'auto'}, {config: catalogConfig})
         assert.ok(requestToolNames(namedStart).includes('mcp_library_lookup_3'))
@@ -422,16 +439,16 @@ test('pi runtime streams actual SDK events, gates writes, persists sessions, and
         await run(request('page-on-demand', 'READ_PAGED_RESULT'))
         assert.ok(!requestToolNames(pageStart).includes('read_tool_output'))
         assert.ok(requestToolNames(pageStart + 1).includes('read_tool_output'))
-        assert.doesNotMatch(JSON.stringify(requests[pageStart + 1].messages), /recovered middle/)
-        assert.match(JSON.stringify(requests.at(-1)?.messages), /recovered middle/)
+        assert.doesNotMatch(JSON.stringify(requests[pageStart + 1].input), /recovered middle/)
+        assert.ok(events.some(event => event.type === 'tool' && event.tool.name === 'read_tool_output'))
         const savedConfig = await runtime.config()
         const isolatedConfig = config()
         isolatedConfig.mcpServers = [{id: 'test', name: 'Test', enabled: true, transport: 'stdio', command: process.execPath,
             args: [path.resolve('tests/fixtures/mcp-server.mjs')]}]
         await run({...request('chat-mcp-only', 'Hello'), permissionMode: 'auto'}, {config: isolatedConfig, mcpOnly: true})
-        const isolatedRequest = requests.at(-1) as {tools: {function: {name: string}}[]; messages: unknown[]}
-        assert.deepEqual(isolatedRequest.tools.map(tool => tool.function.name).sort(), ['mcp_test_ping', 'update_plan'])
-        assert.doesNotMatch(JSON.stringify(isolatedRequest.messages), /fixture-skill|Project conventions persist/)
+        const isolatedRequest = requests.at(-1) as {tools: {name: string}[]; input: unknown[]}
+        assert.deepEqual(isolatedRequest.tools.map(tool => tool.name).sort(), ['mcp_test_ping', 'update_plan'])
+        assert.doesNotMatch(JSON.stringify(isolatedRequest.input), /fixture-skill|Project conventions persist/)
         assert.deepEqual(await runtime.config(), savedConfig, 'MCP-only per-run config preserves saved settings')
         assert.equal((await runtime.workspace(cwd)).memory, 'Project conventions persist.')
         assert.ok((await runtime.workspace(cwd)).skills.some(skill => skill.name === 'fixture-skill'), 'project skills remain enabled')

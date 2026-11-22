@@ -278,9 +278,10 @@ export class AgentRuntime {
         const auth = AuthStorage.inMemory()
         auth.setRuntimeApiKey(request.provider.id, key || 'local-provider')
         const registry = ModelRegistry.inMemory(auth)
+        const anthropic = request.provider.preset === 'anthropic'
         registry.registerProvider(request.provider.id, {
-            api: 'openai-completions', baseUrl: request.provider.baseUrl, authHeader: !!key, apiKey: 'runtime-key',
-            models: [{id: request.modelId, name: request.modelId, reasoning: true, input: ['text'],
+            api: anthropic ? 'anthropic-messages' : 'openai-responses', baseUrl: request.provider.baseUrl, authHeader: !anthropic && !!key, apiKey: 'runtime-key',
+            models: [{id: request.modelId, name: request.modelId, api: anthropic ? 'anthropic-messages' : 'openai-responses', reasoning: true, input: ['text'],
                 contextWindow: request.contextWindow ?? 128000, maxTokens: 16384, cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0},
                 compat: {supportsStore: false, supportsDeveloperRole: false}}],
         })

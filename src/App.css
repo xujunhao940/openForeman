@@ -3,6 +3,44 @@
     --sidebar-motion-easing: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+.disclaimer-content {
+    display: grid;
+    gap: 16px;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.disclaimer-content section {
+    display: grid;
+    gap: 5px;
+}
+
+.disclaimer-content h3,
+.disclaimer-content p {
+    margin: 0;
+}
+
+.disclaimer-content h3 {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.disclaimer-content p {
+    color: var(--muted-foreground);
+}
+
+.disclaimer-confirmation {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding-top: 4px;
+    cursor: pointer;
+}
+
+.disclaimer-confirmation [data-slot="checkbox"] {
+    margin-top: 2px;
+}
+
 .titlebar {
     z-index: 30;
     app-region: drag;

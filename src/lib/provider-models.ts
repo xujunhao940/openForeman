@@ -1,7 +1,7 @@
 export type Provider = {
     id: string
     name: string
-    preset: 'openai' | 'custom'
+    preset: 'openai' | 'anthropic' | 'custom'
     baseUrl: string
     models: string[]
 }
@@ -45,9 +45,12 @@ export function modelsEndpoint(baseUrl: string): string {
     return url.toString()
 }
 
-export async function requestModels(baseUrl: string, apiKey: string): Promise<string[]> {
+export async function requestModels(baseUrl: string, apiKey: string, preset: Provider['preset'] = 'custom'): Promise<string[]> {
+    const headers = preset === 'anthropic'
+        ? {'x-api-key': apiKey, 'anthropic-version': '2023-06-01'}
+        : apiKey ? {Authorization: `Bearer ${apiKey}`} : {}
     const response = await fetch(modelsEndpoint(baseUrl), {
-        headers: apiKey ? {Authorization: `Bearer ${apiKey}`} : {},
+        headers,
         signal: AbortSignal.timeout(30000),
         redirect: 'error',
     })
