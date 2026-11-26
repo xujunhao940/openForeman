@@ -1,8 +1,10 @@
 import {workSkills, type WorkspaceMode} from '../../shared/work'
-import {useEffect, useRef, useState} from 'react'
+import {useEffect, useMemo, useRef, useState} from 'react'
 import {ArrowUpRight, Cpu, Stop, Shield, CircleQuestion, EyeClosed, ShieldCheck, Hammer, ListCheck, CodeCompare} from '@gravity-ui/icons'
 import {QueuedPrompts} from '@/components/queued-prompts'
-import {Zap, Pencil, Check, X} from 'lucide-react'
+import {FeedforwardInput} from '@/components/feedforward-input'
+import {Zap, Pencil, Check, X, Paperclip, ChevronDown} from 'lucide-react'
+import {CollapsibleTrigger} from '@/components/ui/collapsible'
 import {Button} from '@/components/ui/button'
 import {Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger} from '@/components/ui/dialog'
 import {Alert, AlertDescription, AlertTitle} from '@/components/ui/alert'
@@ -16,20 +18,43 @@ import {permissionOptions} from '@/lib/agent-client'
 import {ProjectArtwork} from '@/components/project-artwork'
 import {Conversation, ConversationContent, ConversationEmptyState, ConversationScrollButton} from '@/components/ai-elements/conversation'
 import {Message, MessageContent, MessageResponse} from '@/components/ai-elements/message'
-import {PromptInput, PromptInputFooter, PromptInputSubmit, PromptInputTextarea, PromptInputTools} from '@/components/ai-elements/prompt-input'
+import {PromptInput, PromptInputFooter, PromptInputSubmit, PromptInputTools, usePromptInputAttachments, type PromptInputMessage} from '@/components/ai-elements/prompt-input'
 import {Task, TaskContent, TaskItem, TaskTrigger} from '@/components/ai-elements/task'
-import {Plan, PlanContent, PlanDescription, PlanHeader, PlanTitle} from '@/components/ai-elements/plan'
+import {Plan, PlanContent} from '@/components/ai-elements/plan'
 import {Confirmation, ConfirmationAction, ConfirmationActions, ConfirmationRequest, ConfirmationTitle} from '@/components/ai-elements/confirmation'
 import {Reasoning, ReasoningContent, ReasoningTrigger} from '@/components/ai-elements/reasoning'
 import {Context, ContextContent, ContextContentBody, ContextContentHeader, ContextTrigger} from '@/components/ai-elements/context'
 import {useAgentRun} from '@/hooks/use-agent-events'
 import {agentAPI, configuredModels, readAgentConfig} from '@/lib/agent-client'
-import {defaultAgentConfig, type AgentConfig, type AgentMessage, type AgentMode, type PermissionMode, type WorkspaceState} from '../../shared/agent'
+import {defaultAgentConfig, legacyHistoryLimits, type AgentConfig, type AgentMessage, type AgentMode, type FeedforwardDetail, type PermissionMode, type WorkspaceState} from '../../shared/agent'
 import './project.css'
 
 type ProjectChat = {id: string; name: string; messages: AgentMessage[]; modelId?: string}
 const efforts = ['low', 'medium', 'high', 'xhigh'] as const
 const emptyWorkspace: WorkspaceState = {checkpoints: [], cursor: -1, memory: '', skills: []}
+
+function AttachmentButton() {
+    const {openFileDialog} = usePromptInputAttachments()
+    return <Button type="button" variant="ghost" size="icon-sm" title="Attach files or images" aria-label="Attach files or images" onClick={openFileDialog}><Paperclip/></Button>
+}
+
+function AttachmentPreviews() {
+    const {files, remove} = usePromptInputAttachments()
+    if (!files.length) return null
+    return <div className="attachment-previews">{files.map(file => <div key={file.id} className="attachment-chip">
+        {file.mediaType.startsWith('image/') ? <img src={file.url} alt=""/> : <Paperclip size={14}/>}
+        <span title={file.filename}>{file.filename}</span>
+        <Button type="button" size="icon-xs" variant="ghost" aria-label={`Remove ${file.filename}`} onClick={() => remove(file.id)}><X/></Button>
+    </div>)}</div>
+}
+
+function readModelSettings() {
+    try {
+        const saved = JSON.parse(localStorage.getItem('foreman_settings') ?? '{}')
+        return {defaultModel: saved?.defaultModel, contextWindow: [128000, 256000, 512000].includes(saved?.contextWindow) ? saved.contextWindow : 128000,
+            intraTurnEnabled: saved?.intraTurnEnabled === true}
+    } catch { return {defaultModel: undefined, contextWindow: 128000, intraTurnEnabled: false} }
+}
 
 export default function Project({workspaceMode, projectId, projectPath, initialName, showOverview, chats, activeChatId, onCreateChat, onChatModelChange, onDeleteProject, onMessagesChange, onRenameProject}: {
     workspaceMode: WorkspaceMode; projectId: string; projectPath: string; initialName: string; showOverview: boolean
@@ -41,16 +66,22 @@ export default function Project({workspaceMode, projectId, projectPath, initialN
     const [enabledModelIds, setEnabledModelIds] = useState<string[] | null>(() => {
         try { const saved = JSON.parse(localStorage.getItem(`foreman_project_models_${projectId}`) ?? 'null'); return Array.isArray(saved) ? saved : null } catch { return null }
     })
-    const models = availableModels.filter(model => enabledModelIds === null || enabledModelIds.includes(model.id))
+    const models = useMemo(() => availableModels.filter(model => enabledModelIds === null || enabledModelIds.includes(model.id)), [availableModels, enabledModelIds])
     const activeChat = chats.find(chat => chat.id === activeChatId)
-    function configuredDefaultModel() {
-        try {
-            const value = JSON.parse(localStorage.getItem('foreman_settings') ?? '{}')?.defaultModel
-            return typeof value === 'string' && models.some(model => model.id === value && model.enabled) ? value : models[0]?.id ?? ''
-        } catch { return models[0]?.id ?? '' }
-    }
-    const defaultModel = configuredDefaultModel()
+    const [modelSettings, setModelSettings] = useState(readModelSettings)
+    useEffect(() => {
+        const refresh = (event: StorageEvent) => {
+            if (event.storageArea === localStorage && (event.key === 'foreman_settings' || event.key === null)) {
+                setModelSettings(readModelSettings())
+            }
+        }
+        window.addEventListener('storage', refresh)
+        return () => window.removeEventListener('storage', refresh)
+    }, [])
+    const defaultModel = models.some(model => model.id === modelSettings.defaultModel && model.enabled) ? modelSettings.defaultModel : models[0]?.id ?? ''
+    const {contextWindow} = modelSettings
     const [modelId, setModelId] = useState(() => activeChat?.modelId ?? defaultModel)
+    const activeModelId = modelId
     const [mode, setMode] = useState<AgentMode>('build')
     const [effort, setEffort] = useState<typeof efforts[number]>('medium')
     const [foremanMode, setForemanMode] = useState(false)
@@ -61,6 +92,7 @@ export default function Project({workspaceMode, projectId, projectPath, initialN
     const [actionPending, setActionPending] = useState(false)
     const [submitting, setSubmitting] = useState(false)
     const [prompt, setPrompt] = useState('')
+    const [feedforwardDetails, setFeedforwardDetails] = useState<FeedforwardDetail[]>([])
     const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
     const [editingText, setEditingText] = useState('')
     const composerRef = useRef<HTMLDivElement>(null)
@@ -71,15 +103,11 @@ export default function Project({workspaceMode, projectId, projectPath, initialN
     const permissionMode = permissionOverride ?? config.permissionMode
     const contextUsage = messages.slice().reverse().find(message => message.contextUsage)?.contextUsage
     const finalAssistantMessageId = messages.slice().reverse().find(message => message.role === 'assistant')?.id
+
+    useEffect(() => { setFeedforwardDetails([]) }, [activeChatId])
     const summaries = messages.filter(message => message.runSummary)
     const conversationTime = summaries.reduce((sum, message) => sum + (message.durationMs ?? 0), 0)
     const conversationTokens = summaries.reduce((sum, message) => sum + (message.usage?.total ?? 0), 0)
-    function contextWindow() {
-        try {
-            const value = JSON.parse(localStorage.getItem('foreman_settings') ?? '{}')?.contextWindow
-            return [128000, 256000, 512000].includes(value) ? value : 128000
-        } catch { return 128000 }
-    }
     useEffect(() => {
         const next = activeChat?.modelId ?? defaultModel
         setModelId(next)
@@ -147,35 +175,46 @@ export default function Project({workspaceMode, projectId, projectPath, initialN
         setError('')
         setMode(value)
     }
-    async function submitMessage({text, files}: {text: string; files?: unknown[]}, requestedMode: AgentMode = mode) {
-        if (!text.trim()) return
+    async function submitMessage({text, files = []}: Partial<PromptInputMessage> & {text: string}, requestedMode: AgentMode = mode, details: FeedforwardDetail[] = feedforwardDetails) {
+        if (!text.trim() && !files.length) return
+        if (!models.length) { setError('Enable a model in Settings to send a message.'); throw new Error('No model configured.') }
+        if (files.length) {
+            try {
+                const paths = await agentAPI().upload(projectPath, files.map(file => ({filename: file.filename || 'attachment', url: file.url})))
+                text = [text.trim(), 'Attached project files:', ...paths.map(path => '• ' + path)].filter(Boolean).join('\n')
+            } catch (error) { setError(error.message); throw error }
+        }
+        const requestText = details.length
+            ? `${text.trim()}\n\nAdditional details:\n${details.map(detail => `- ${detail.phrase} · ${detail.label}: ${detail.value}`).join('\n')}`
+            : text.trim()
         if (running) {
             const chatId = activeChat?.id
             if (!chatId) return
-            await action(async () => {
-                await agentAPI().enqueue(chatId, text.trim())
+            try {
+                const queuedId = await agentAPI().enqueue(chatId, requestText)
+                if (modelSettings.intraTurnEnabled) await agentAPI().updateQueue(chatId, queuedId, {kind: 'steer'})
                 setPrompt('')
-            })
+                setFeedforwardDetails([])
+            } catch (error) { setError(error.message); throw error }
             return
         }
-        if (files?.length) {
-            const message = 'Reference a project file path in your message; attachments are not supported yet.'
-            setError(message)
-            throw new Error(message)
-        }
-        const model = models.find(model => model.id === modelId)
+        const model = models.find(model => model.id === activeModelId)
         if (!model) { setError('Add a provider, fetch models and enable one in Settings → Models.'); throw new Error('No model configured.') }
         const chatId = activeChat?.id ?? onCreateChat()
         if (!activeChat && permissionOverride) localStorage.setItem(`foreman_chat_permissions_${chatId}`, permissionOverride)
         setSubmitting(true); setError('')
-        const message: AgentMessage = {id: crypto.randomUUID(), role: 'user', text: text.trim()}
+        const message: AgentMessage = {id: crypto.randomUUID(), role: 'user', text: text.trim(), ...(details.length ? {feedforwardDetails: details} : {})}
         onMessagesChange(chatId, current => [...current, message])
+        setFeedforwardDetails([])
         try {
             onChatModelChange(chatId, modelId)
-            await agentAPI().start({workspaceMode, chatId, projectPath, text: message.text, mode: requestedMode, modelId, effort, permissionMode,
-                provider: model.providers.find(provider => provider.id === model.providerId)!, history: messages, foremanMode, contextWindow: contextWindow()})
+            const history = messages.filter(message => !message.planSteps).slice(-legacyHistoryLimits.messages).map(({id, role, text, feedforwardDetails}) => ({
+                id, role, text: [String(text), ...(feedforwardDetails?.length ? ['Additional details:', ...feedforwardDetails.map(detail => `- ${detail.phrase} · ${detail.label}: ${detail.value}`)] : [])].join('\n\n').slice(0, legacyHistoryLimits.charactersPerMessage),
+            }))
+            await agentAPI().start({workspaceMode, chatId, projectPath, text: requestText, mode: requestedMode, modelId: activeModelId, effort, permissionMode,
+                provider: model.providers.find(provider => provider.id === model.providerId)!, history, foremanMode, contextWindow: readModelSettings().contextWindow})
             setPrompt('')
-        } catch (error) { onMessagesChange(chatId, current => current.filter(item => item.id !== message.id)); setError(error.message); throw error }
+        } catch (error) { onMessagesChange(chatId, current => current.filter(item => item.id !== message.id)); setFeedforwardDetails(details); setError(error.message); throw error }
         finally { setSubmitting(false) }
     }
     async function reviseMessage(message: AgentMessage) {
@@ -184,7 +223,7 @@ export default function Project({workspaceMode, projectId, projectPath, initialN
         const updated = {...message, text: editingText.trim()}
         onMessagesChange(activeChat.id, current => current.map(item => item.id === message.id ? updated : item))
         setEditingMessageId(null)
-        await submitMessage({text: revised})
+        await submitMessage({text: revised}, mode, message.feedforwardDetails ?? [])
     }
     async function action(work: () => Promise<unknown>) {
         setError(''); setActionPending(true)
@@ -217,10 +256,16 @@ export default function Project({workspaceMode, projectId, projectPath, initialN
                         </Card>)}</div>
                     </section>}
                     <Conversation className="project-conversation" style={{"--agent-composer-height": `${composerHeight}px`} as React.CSSProperties}><ConversationContent className="project-conversation-content">
-                        {messages.length ? messages.map(message => <Message key={message.id} from={message.role}>
+                        {messages.length ? messages.map((message, messageIndex) => message.planSteps ? <Plan className="inline-plan" key={message.id ?? `plan-${messageIndex}`}>
+                            <CollapsibleTrigger className="inline-plan-toggle"><ListCheck/>Implementation Plan<ChevronDown/></CollapsibleTrigger>
+                            <PlanContent><ol className="agent-plan-steps">{message.planSteps.map((step, i) => <li key={i}>{step}</li>)}</ol></PlanContent>
+                        </Plan> : <Message key={message.id ?? `message-${messageIndex}`} id={`turn-${message.id ?? messageIndex}`} from={message.role}>
                             <MessageContent>
                                 {message.reasoning && <Reasoning isStreaming={running && message.id === messages[messages.length - 1]?.id}><ReasoningTrigger/><ReasoningContent>{message.reasoning}</ReasoningContent></Reasoning>}
-                                {editingMessageId === message.id ? <><textarea className="agent-message-editor" value={editingText} onChange={event => setEditingText(event.target.value)} aria-label="Edit message"/><div className="agent-message-edit-actions"><Button size="sm" onClick={() => reviseMessage(message)} disabled={running || !editingText.trim()}><Check/>Save and resend</Button><Button size="icon-sm" variant="ghost" aria-label="Cancel edit" onClick={() => setEditingMessageId(null)}><X/></Button></div></> : <MessageResponse>{message.text}</MessageResponse>}
+                                {editingMessageId === message.id ? <><textarea className="agent-message-editor" value={editingText} onChange={event => setEditingText(event.target.value)} aria-label="Edit message"/><div className="agent-message-edit-actions"><Button size="sm" onClick={() => reviseMessage(message)} disabled={running || !editingText.trim()}><Check/>Save and resend</Button><Button size="icon-sm" variant="ghost" aria-label="Cancel edit" onClick={() => setEditingMessageId(null)}><X/></Button></div></> : <>
+                                    {message.feedforwardDetails?.length ? <dl className="feedforward-message-details" aria-label="Added details">{message.feedforwardDetails.map(detail => <div key={`${detail.phrase}-${detail.label}`}><dt>{detail.phrase} · {detail.label}</dt><dd>{detail.value}</dd></div>)}</dl> : null}
+                                    <MessageResponse>{message.text}</MessageResponse>
+                                </>}
                                 {message.delivery && <span className="agent-message-delivery">{message.delivery === 'steer' ? 'Steered into current run' : 'Added to waitlist'}</span>}
                             </MessageContent>
                             {message.role === 'user' && !running && editingMessageId !== message.id && <div className="agent-message-actions"><Button size="icon-sm" variant="ghost" aria-label="Edit message" title="Edit message" onClick={() => {setEditingMessageId(message.id); setEditingText(message.text)}}><Pencil/></Button></div>}
@@ -229,9 +274,8 @@ export default function Project({workspaceMode, projectId, projectPath, initialN
                             description={workspaceMode === 'work' ? `Use files in ${initialName} to create a deliverable.` : 'Plan a change, work with your codebase, or review your diff. Your agent runs locally on pi.'}
                             icon={<Cpu/>}
                         />}
-                        {run.steps.length > 0 && <Plan defaultOpen><PlanHeader><PlanTitle>Implementation plan</PlanTitle><PlanDescription>{mode === 'plan' ? 'Read-only planning · switch to Build when ready.' : 'Current agent plan'}</PlanDescription></PlanHeader><PlanContent><ol className="agent-plan-steps">{run.steps.map((step, i) => <li key={`${i}-${step}`}>{step}</li>)}</ol></PlanContent></Plan>}
                         {run.tools.length > 0 && <Task defaultOpen={false}><TaskTrigger title={`Tool activity · ${run.tools.length} calls`}/><TaskContent><div className="agent-tool-list">{run.tools.map(tool => <Task key={tool.id} defaultOpen={false}><TaskTrigger title={`${tool.name} · ${tool.state}`}/><TaskContent><TaskItem><pre>{tool.input}</pre>{tool.output && <pre>{tool.output}</pre>}</TaskItem></TaskContent></Task>)}</div></TaskContent></Task>}
-                        {running && <p role="status" className="agent-running">{run.permissions.length ? 'Waiting for your permission…' : 'Agent is working…'}</p>}
+                        {running && <p role="status" className="agent-running"><span className="activity-wave" aria-hidden="true"><i/><i/><i/><i/></span>{run.permissions.length ? 'Waiting for your permission…' : run.tools.some(tool => tool.state === 'running') ? 'Using tools…' : 'Agent is working…'}</p>}
                         {run.permissions.map(request => <Confirmation key={request.id} approval={{id: request.id}} state="approval-requested"><ConfirmationRequest><ConfirmationTitle><Shield/> Allow {request.tool}?</ConfirmationTitle><pre className="agent-permission-input">{request.input}</pre><ConfirmationActions><ConfirmationAction variant="outline" disabled={actionPending} onClick={() => action(() => agentAPI().approve(request.id, false))}>Deny</ConfirmationAction><ConfirmationAction disabled={actionPending} onClick={() => action(() => agentAPI().approve(request.id, true))}>Allow once</ConfirmationAction></ConfirmationActions></ConfirmationRequest></Confirmation>)}
                         {messages.filter(message => message.role === 'assistant' && (message.id === finalAssistantMessageId && !running && (message.usage || message.durationMs !== undefined || message.modelId || message.foreman) || message.changes?.files.length)).map(message => <div key={`${message.id}-artifacts`} className="response-artifacts">
                             {message.id === finalAssistantMessageId && !running && (message.usage || message.durationMs !== undefined || message.modelId || message.foreman) && <Dialog>
@@ -260,7 +304,11 @@ export default function Project({workspaceMode, projectId, projectPath, initialN
                                 redoDisabled={running || actionPending || workspace.checkpoints[workspace.cursor]?.id !== message.changes.beforeId}
                                 onUndo={() => restore(message.changes.beforeId)} onRedo={() => restore(message.changes.afterId)}/>}
                         </div>)}
-                    </ConversationContent><ConversationScrollButton/></Conversation>
+                    </ConversationContent><ConversationScrollButton/>
+                        {messages.some(m => m.role === 'user') && <nav className="turn-handles" aria-label="Conversation history">{messages.map((m, index) => ({message: m, index})).filter(item => item.message.role === 'user').map(({message, index}) =>
+                            <button type="button" key={message.id ?? `turn-${index}`} className="turn-handle" aria-label={message.text} title={message.text} onClick={() => document.getElementById(`turn-${message.id ?? index}`)?.scrollIntoView({block: 'start', behavior: 'instant'})}><span/></button>
+                        )}</nav>}
+                    </Conversation>
                     <div className="agent-composer" ref={composerRef}>
                         {workspaceMode === 'work' && !messages.length && config.plugins.skills && (
                             <div className="work-starters">
@@ -278,14 +326,16 @@ export default function Project({workspaceMode, projectId, projectPath, initialN
                             catch (err) { setError(String(err)); throw err }
                             finally { setActionPending(false) }
                         }}/>
-                        <PromptInput className="project-prompt" onSubmit={message => submitMessage(message)}>
-                            <PromptInputTextarea value={prompt} onChange={event => setPrompt(event.target.value)} placeholder={mode === 'plan' ? 'Describe the change to plan…' : mode === 'review' ? 'What should the agent review?' : workspaceMode === 'work' ? 'Describe your deliverable or reference a file…' : 'Ask Foreman to work on your project…'} aria-label="Message the project agent"/>
+                        <PromptInput key={activeChatId ?? projectId} className="project-prompt" multiple maxFiles={8} maxFileSize={10 * 1024 * 1024} onError={err => setError(err.message)} onSubmit={message => submitMessage(message)}>
+                            <AttachmentPreviews/>
+                            <FeedforwardInput value={prompt} onChange={setPrompt} details={feedforwardDetails} onDetailsChange={setFeedforwardDetails} placeholder={mode === 'plan' ? 'Describe the change to plan…' : mode === 'review' ? 'What should the agent review?' : workspaceMode === 'work' ? 'Describe your deliverable or reference a file…' : 'Ask Foreman to work on your project…'} />
                             <PromptInputFooter className="project-prompt-footer"><PromptInputTools className="project-prompt-tools project-prompt-tools-left">
+                                <AttachmentButton/>
                                 <Select items={[{value:"build",label:"Build"},{value:"plan",label:"Plan"},{value:"review",label:"Review"}]} value={mode} disabled={running} onValueChange={value => value && selectMode(value as AgentMode)}><SelectTrigger aria-label="Agent mode" title={modeLabel(mode)} size="sm" className="composer-mode-trigger"><ModeIcon mode={mode}/><SelectValue className="sr-only"/></SelectTrigger><SelectContent className="composer-left-select-menu"><SelectGroup><SelectItem value="build"><ModeIcon mode="build"/><span>Build</span></SelectItem><SelectItem value="plan" disabled={!config.plugins['plan-mode']}><ModeIcon mode="plan"/><span>Plan</span></SelectItem><SelectItem value="review" disabled={!config.plugins.review || !models.some(model => model.id === 'codex-auto-review')}><ModeIcon mode="review"/><span>Review</span></SelectItem></SelectGroup></SelectContent></Select>
                                 <Select items={permissionOptions} value={permissionMode} disabled={running} onValueChange={value => value && changePermissions(value as PermissionMode)}><SelectTrigger aria-label="Permission mode" size="sm" className="composer-permission-trigger"><PermissionIcon mode={permissionMode}/><SelectValue/></SelectTrigger><SelectContent className="composer-left-select-menu composer-permission-content"><SelectGroup>{permissionOptions.map(option => <SelectItem key={option.value} value={option.value}><PermissionIcon mode={option.value as PermissionMode}/>{option.label}</SelectItem>)}</SelectGroup></SelectContent></Select>
                             </PromptInputTools><div className="project-prompt-tools project-prompt-tools-right">
-                                <DropdownMenu><DropdownMenuTrigger aria-label="Model and reasoning effort" disabled={running || !models.length} render={<Button type="button" size="sm" variant="ghost" className="composer-model-effort"/>}><span className="composer-model-name">{modelId || 'Choose model'}</span><span className="composer-effort-name">{effort}</span><Zap className="composer-radical-icon" aria-hidden="true" fill={foremanMode ? 'currentColor' : 'none'}/></DropdownMenuTrigger><DropdownMenuContent align="start" className="project-model-effort-menu"><DropdownMenuGroup className="project-model-group"><DropdownMenuLabel>Model</DropdownMenuLabel><DropdownMenuRadioGroup className="project-model-list" value={modelId} onValueChange={selectModel}>{models.map(model => <DropdownMenuRadioItem key={model.id} value={model.id}>{model.id}</DropdownMenuRadioItem>)}</DropdownMenuRadioGroup></DropdownMenuGroup><div className="project-effort-menu-heading"><span>Reasoning effort</span><output>{effort}</output></div><Slider disabled={running} value={[efforts.indexOf(effort)]} min={0} max={efforts.length - 1} step={1} thumbLabels={['Reasoning effort']} onValueChange={value => setEffort(efforts[Array.isArray(value) ? value[0] : value])}/><button type="button" className={`foreman-mode-toggle${foremanMode ? ' is-active' : ''}`} aria-label={`${foremanMode ? 'Disable' : 'Enable'} Foreman Mode`} aria-pressed={foremanMode} disabled={running} title="Foreman Mode" onClick={toggleForemanMode}><Zap aria-hidden="true" fill={foremanMode ? 'currentColor' : 'none'}/><span>Foreman Mode</span></button><p className="foreman-mode-description">Handles focused tasks directly. For complex work, independent research can run in parallel.</p></DropdownMenuContent></DropdownMenu>
-                                <Context usedTokens={Math.min(contextUsage?.tokens ?? 0, contextUsage?.contextWindow ?? contextWindow())} maxTokens={contextUsage?.contextWindow || contextWindow()}><div className="context-usage"><ContextTrigger aria-label="Context window usage" title="Estimated tokens used in the active pi context window" className="context-trigger"/></div><ContextContent side="top" align="end" className="context-usage-popover"><ContextContentHeader/><ContextContentBody><span className="context-detail-label">Estimated tokens in the active pi context window</span></ContextContentBody></ContextContent></Context>
+                                <DropdownMenu><DropdownMenuTrigger aria-label="Model and reasoning effort" disabled={running || !models.length} render={<Button type="button" size="sm" variant="ghost" className="composer-model-effort"/>}><span className="composer-model-name">{activeModelId || 'Choose model'}</span><span className="composer-effort-name">{effort}</span><Zap className="composer-radical-icon" aria-hidden="true" fill={foremanMode ? 'currentColor' : 'none'}/></DropdownMenuTrigger><DropdownMenuContent align="start" className="project-model-effort-menu"><DropdownMenuGroup className="project-model-group"><DropdownMenuLabel>Model</DropdownMenuLabel><DropdownMenuRadioGroup className="project-model-list" value={modelId} onValueChange={selectModel}>{models.map(model => <DropdownMenuRadioItem key={model.id} value={model.id}>{model.id}</DropdownMenuRadioItem>)}</DropdownMenuRadioGroup></DropdownMenuGroup><div className="project-effort-menu-heading"><span>Reasoning effort</span><output>{effort}</output></div><Slider disabled={running} value={[efforts.indexOf(effort)]} min={0} max={efforts.length - 1} step={1} thumbLabels={['Reasoning effort']} onValueChange={value => setEffort(efforts[Array.isArray(value) ? value[0] : value])}/><button type="button" className={`foreman-mode-toggle${foremanMode ? ' is-active' : ''}`} aria-label={`${foremanMode ? 'Disable' : 'Enable'} Foreman Mode`} aria-pressed={foremanMode} disabled={running} title="Foreman Mode" onClick={toggleForemanMode}><Zap aria-hidden="true" fill={foremanMode ? 'currentColor' : 'none'}/><span>Foreman Mode</span></button><p className="foreman-mode-description">Handles focused tasks directly. For complex work, independent research can run in parallel.</p></DropdownMenuContent></DropdownMenu>
+                                <Context usedTokens={Math.min(contextUsage?.tokens ?? 0, contextUsage?.contextWindow ?? contextWindow)} maxTokens={contextUsage?.contextWindow || contextWindow}><div className="context-usage"><ContextTrigger aria-label="Context window usage" title="Estimated tokens used in the active pi context window" className="context-trigger"/></div><ContextContent side="top" align="end" className="context-usage-popover"><ContextContentHeader/><ContextContentBody><span className="context-detail-label">Estimated tokens in the active pi context window</span></ContextContentBody></ContextContent></Context>
                                 {!running && run.status === 'stopped' && messages.some(message => message.role === 'user') && <Button size="sm" variant="outline" onClick={() => submitMessage({text:'Continue from where you stopped. Review the current conversation and continue the unfinished work.'})}>Continue</Button>}
                                 {running && <Button type="button" size="icon-sm" variant="outline" aria-label="Stop run" title="Stop run" onClick={() => action(() => agentAPI().stop(activeChatId))}><Stop/></Button>}
                                 <PromptInputSubmit disabled={!running && !models.length} status="ready"><ArrowUpRight/></PromptInputSubmit>

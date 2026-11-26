@@ -3,9 +3,11 @@ import {CircleInfo, Cpu, Shield, PlugConnection as PlugZap} from "@gravity-ui/ic
 import {Button} from "@/components/ui/button"
 import AboutSettings from "@/pages/settings/about"
 import ModelsSettings from "@/pages/settings/models.tsx"
+import IntraTurnSettings from "@/pages/settings/intra-turn.tsx"
 import PermissionsSettings from "@/pages/settings/permissions"
 import ProvidersSettings from "@/pages/settings/providers.tsx"
 import type {ModelPreference, Provider} from "@/lib/provider-models"
+import {Zap} from "lucide-react"
 import "./settings.css"
 
 export type SettingsValues = {
@@ -17,6 +19,8 @@ export type SettingsValues = {
     fallbackModel: string
     routingEnabled: boolean
     contextWindow: 128000 | 256000 | 512000
+    intraTurnEnabled: boolean
+    intraTurnModelId: string
     openaiKey: string
     anthropicKey: string
     providers: Provider[]
@@ -35,6 +39,8 @@ const defaults: SettingsValues = {
     fallbackModel: "gpt-6.1-sol",
     routingEnabled: false,
     contextWindow: 128000,
+    intraTurnEnabled: false,
+    intraTurnModelId: '',
     openaiKey: "",
     anthropicKey: "",
     providers: [],
@@ -42,6 +48,7 @@ const defaults: SettingsValues = {
 }
 const sections = [
     {id: "models", label: "Models", icon: Cpu},
+    {id: "intra-turn", label: "Intra-turn", icon: Zap},
     {id: "providers", label: "Providers", icon: PlugZap},
     {id: "permissions", label: "Permissions", icon: Shield},
     {id: "about", label: "About", icon: CircleInfo},
@@ -59,6 +66,8 @@ function readSettings(): SettingsValues {
             fallbackModel: typeof stored.fallbackModel === "string" ? stored.fallbackModel : defaults.fallbackModel,
             routingEnabled: stored.routingEnabled === true,
             contextWindow: [128000, 256000, 512000].includes(stored.contextWindow) ? stored.contextWindow : defaults.contextWindow,
+            intraTurnEnabled: stored.intraTurnEnabled === true,
+            intraTurnModelId: typeof stored.intraTurnModelId === 'string' ? stored.intraTurnModelId : '',
             openaiKey: "",
             anthropicKey: "",
             providers: Array.isArray(stored.providers) ? stored.providers.filter((provider: Provider) =>
@@ -116,6 +125,7 @@ export default function Settings() {
                     <header className="settings-detail-header"><h1 id="settings-title">{sections.find((item) => item.id === section)!.label}</h1></header>
                     {storageError && <p role="alert" className="settings-error">{storageError}</p>}
                     {section === "models" && <ModelsSettings values={values} update={update} />}
+                    {section === "intra-turn" && <IntraTurnSettings values={values} update={update} />}
                     {section === "permissions" && <PermissionsSettings/>}
                     {section === "about" && <AboutSettings/>}
                     <div hidden={section !== "providers"}><ProvidersSettings values={values} update={update} /></div>

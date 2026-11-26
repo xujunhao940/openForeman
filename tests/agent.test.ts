@@ -1,10 +1,11 @@
 import {test} from 'node:test'
 import assert from 'node:assert/strict'
-import {mkdtemp, mkdir, writeFile, readFile, symlink, rm, realpath} from 'node:fs/promises'
+import {mkdtemp, mkdir, open, writeFile, appendFile, readFile, link, symlink, rm, realpath} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import path from 'node:path'
 import {createServer} from 'node:http'
 import {once} from 'node:events'
+import {DefaultResourceLoader} from '@mariozechner/pi-coding-agent'
 import {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js'
 import {StreamableHTTPServerTransport} from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import {execFileSync} from 'node:child_process'
@@ -12,6 +13,10 @@ import {CheckpointStore, workspaceDir, safeProjectFile, workspaceDiff, workspace
 import {PermissionGate} from '../electron/agent/permissions'
 import {AgentRuntime, foremanModeSubagentLimit, type RunOptions} from '../electron/agent/runtime'
 import {projectToolOutputs} from '../electron/agent/tool-output'
+import {createMcpCatalog} from '../electron/agent/tool-catalog'
+import {convertToLlm, defineTool} from '@mariozechner/pi-coding-agent'
+import {completeSimple, getModel, type AssistantMessage} from '@mariozechner/pi-ai'
+import {Type} from 'typebox'
 import {connectMcp} from '../electron/agent/mcp'
 import {modernWebGuidancePaths, modernWebGuidanceTools} from '../electron/agent/modern-web-guidance'
 import {fetchPublicPage} from '../electron/agent/web'
@@ -38,6 +43,48 @@ test('tool output references stay inside the current request and explicit pages 
     assert.equal(original.content[0].text, text)
     assert.deepEqual(projectToolOutputs([original], false)[0], original)
     assert.match(JSON.stringify(projectToolOutputs([original], true)), /read_tool_output/)
+})
+
+test('read-back verification references visible write arguments across Responses and Anthropic replay', async () => {
+    const text = 'validated file contents\n'.repeat(400)
+    const write = {role: 'assistant', stopReason: 'toolUse', model: 'other-model', api: 'openai-responses', provider: 'openai', content: [{
+        type: 'toolCall', name: 'write', id: 'call_1|fc_1', arguments: {path: 'out.txt', content: text},
+    }]} as AssistantMessage
+    const read = {role: 'toolResult' as const, toolName: 'read', toolCallId: 'read-1', timestamp: 1, isError: false,
+        content: [{type: 'text' as const, text}]}
+    const changed = {...read, content: [{type: 'text' as const, text: text + 'edited'}]}
+    for (const paging of [true, false]) {
+        const projected = projectToolOutputs([write, read, changed], paging)
+        assert.match(JSON.stringify(projected[1]), /content argument of write call #1/)
+        assert.deepEqual(projected[2], changed)
+        assert.deepEqual(projectToolOutputs([read], paging), [read])
+        assert.deepEqual(projectToolOutputs([{...write, stopReason: 'aborted'}, read], paging)[1], read)
+        assert.ok(JSON.stringify(projected[1]).length < JSON.stringify(read).length / 10)
+    }
+    for (const model of [getModel('openai', 'gpt-4.1'), getModel('anthropic', 'claude-3-5-haiku-20241022')]) {
+        let payload = ''
+        // Inspect the SDK's real wire payload and stop before a network call.
+        await completeSimple(model, {messages: convertToLlm(projectToolOutputs([write, read], true))}, {
+            apiKey: 'fixture', onPayload(value) { payload = JSON.stringify(value); throw new Error('Captured payload.') },
+        })
+        assert.match(payload, /content argument of write call #1/)
+        assert.equal(payload.match(/validated file contents/g)?.length, 400)
+    }
+})
+
+test('MCP catalogs defer expensive schemas and retain active selections through steering', () => {
+    const tool = defineTool({name: 'mcp_library_big_lookup', label: 'Lookup', description: 'Lookup',
+        parameters: Type.Object({filter: Type.String({description: 'x'.repeat(17000)})}),
+        execute: async () => ({content: [{type: 'text', text: 'ok'}], details: {}})})
+    const catalog = createMcpCatalog([tool])
+    assert.ok(catalog)
+    const selected = {role: 'toolResult' as const, toolName: 'load_mcp_tools', toolCallId: 'load-1', timestamp: 1,
+        isError: false, content: [], details: {names: [tool.name]}}
+    const user = {role: 'user' as const, content: 'Continue', timestamp: 2}
+    const end = {role: 'assistant', stopReason: 'stop', content: []} as AssistantMessage
+    assert.ok(catalog.visibleNames([selected, user]).has(tool.name))
+    assert.ok(!catalog.visibleNames([selected, end, user]).has(tool.name))
+    assert.ok(catalog.visibleNames([selected, end, {...user, content: tool.name}]).has(tool.name))
 })
 
 test('Foreman Mode scales subagent concurrency with reasoning effort', () => {
@@ -89,6 +136,45 @@ test('checkpoints restore writes, additions and deletions, preserve unrelated ed
         await symlink(root, path.join(cwd, 'outside'))
         await assert.rejects(safeProjectFile(cwd, 'outside/file.txt'), /Symlink/)
         await assert.rejects(safeProjectFile(cwd, '.git/config'), /outside .git/)
+    } finally { await rm(root, {recursive: true, force: true}) }
+})
+
+test('checkpoints accept the exact encoded size limit and retain the manifest when the next byte exceeds it', async () => {
+    const root = await temp()
+    try {
+        const cwd = path.join(root, 'project')
+        await mkdir(cwd)
+        const first = path.join(cwd, 'part-0')
+        await writeFile(first, Buffer.alloc(6 * 1024 * 1024))
+        for (let i = 1; i < 6; i++) await link(first, path.join(cwd, `part-${i}`))
+        const store = new CheckpointStore(path.join(root, 'state'), cwd)
+        const exact = await store.capture('36 MiB')
+        assert.equal(exact.files, 6)
+        await writeFile(path.join(cwd, 'extra'), 'x')
+        await assert.rejects(store.capture('too large'), /exceeds 36 MiB/)
+        assert.deepEqual(await store.state(), {snapshots: [exact], cursor: 0})
+    } finally { await rm(root, {recursive: true, force: true}) }
+})
+
+test('checkpoint reads detect growth after a short read at the original file size', async t => {
+    const root = await temp()
+    try {
+        const cwd = path.join(root, 'project')
+        await mkdir(cwd)
+        const file = path.join(cwd, 'growing')
+        await writeFile(file, 'abc')
+        const sample = await open(file, 'r')
+        const handlePrototype = Object.getPrototypeOf(sample)
+        await sample.close()
+        const read = handlePrototype.read
+        const shortRead = t.mock.method(handlePrototype, 'read', async function (this: typeof sample, buffer: Buffer, offset: number, length: number) {
+            await appendFile(file, 'd')
+            return read.call(this, buffer, offset, length - 1)
+        }, {times: 1})
+        const store = new CheckpointStore(path.join(root, 'state'), cwd)
+        await assert.rejects(store.capture('growing file'), /File grew/)
+        assert.equal(shortRead.mock.callCount(), 1)
+        assert.equal((await store.state()).cursor, -1)
     } finally { await rm(root, {recursive: true, force: true}) }
 })
 
@@ -170,7 +256,7 @@ test('MCP Streamable HTTP discovers and executes tools over the HTTP transport',
     }
 })
 
-test('pi runtime streams actual SDK events, gates writes, persists sessions, and honors plan mode and plugin toggles', {timeout: 60000}, async () => {
+test('pi runtime streams actual SDK events, gates writes, persists sessions, and honors plan mode and plugin toggles', {timeout: 60000}, async t => {
     const root = await temp()
     const requests: Record<string, unknown>[] = []
     const questions = ['Inspect this repository and report findings.', 'Identify missing regression tests.']
@@ -299,6 +385,9 @@ test('pi runtime streams actual SDK events, gates writes, persists sessions, and
         await mkdir(skillDir, {recursive: true})
         await writeFile(path.join(skillDir, 'SKILL.md'), '---\nname: fixture-skill\ndescription: Test project skill discovery.\n---\nInspect files before modifying them.\n')
         const first = await run(request('chat-1', 'WRITE'))
+        const firstRequest = requests[0] as {input: unknown; tools: {name: string; description: string}[]}
+        assert.doesNotMatch(JSON.stringify(firstRequest.input), /Project memory:/, 'empty project memory adds no prompt section')
+        assert.match(firstRequest.tools.find(tool => tool.name === 'subagent')!.description, /single tasks yourself/)
         assert.equal(await readFile(path.join(cwd, 'output.txt'), 'utf8'), 'from pi')
         assert.ok(first.some(event => event.type === 'message' && event.message.text.includes('Verified pi response')))
         assert.ok(first.some(event => event.type === 'permission' && event.request.tool === 'write'))
@@ -346,6 +435,13 @@ test('pi runtime streams actual SDK events, gates writes, persists sessions, and
         assert.equal((await runtime.config()).permissionMode, 'ask', 'per-run overrides preserve defaults')
         await writeFile(path.join(cwd, 'output.txt'), 'manual edit')
         const override = await run({...request('chat-readonly', 'WRITE'), permissionMode: 'read-only'})
+        const advertisedTools = () => (requests.at(-1)!.tools as {name: string}[]).map(tool => tool.name)
+        const assertReadOnlyTools = () => {
+            const tools = advertisedTools()
+            assert.ok(tools.includes('read') && tools.includes('subagent'))
+            assert.ok(!tools.some(name => ['bash', 'edit', 'write'].includes(name)))
+        }
+        assertReadOnlyTools()
         assert.ok(override.some(event => event.type === 'tool' && event.tool.state === 'error' && event.tool.output?.includes('Read-only')))
         assert.equal(await readFile(path.join(cwd, 'output.txt'), 'utf8'), 'manual edit')
         assert.ok(!override.some(event => event.type === 'message' && event.message.changes))
@@ -358,13 +454,34 @@ test('pi runtime streams actual SDK events, gates writes, persists sessions, and
         assert.ok(lastRequest.input.filter(message => message.role === 'user').length >= 2, 'pi history resumed from disk')
         assert.ok(JSON.stringify(lastRequest.input).includes('Project conventions persist.'))
         const readonly = await run(request('chat-plan', 'WRITE', 'plan'))
+        assertReadOnlyTools()
         assert.ok(readonly.some(event => event.type === 'tool' && event.tool.state === 'error' && event.tool.output?.includes('Read-only')))
         assert.ok(!readonly.some(event => event.type === 'permission'))
+        const resourceReload = t.mock.method(DefaultResourceLoader.prototype, 'reload')
         const planned = await run(request('chat-plan2', 'PLAN', 'plan'))
         assert.ok(planned.some(event => event.type === 'plan' && event.steps.length === 2))
+        const ordinaryScans = resourceReload.mock.callCount()
+        const delegationStart = requests.length
+        const systemFile = path.join(cwd, '.pi', 'SYSTEM.md')
+        const projectInstructions = path.join(cwd, 'AGENTS.md')
+        await writeFile(systemFile, 'Research fixture system prompt.')
+        await writeFile(projectInstructions, 'Research fixture project instructions.')
         const delegated = await run({...request('chat-delegate', 'DELEGATE'), foremanMode: true})
+        assert.equal(resourceReload.mock.callCount() - ordinaryScans, ordinaryScans + 1, 'the parallel batch discovers project resources once')
+        resourceReload.mock.restore()
         assert.equal(arrivals, 2)
         assert.equal(delegated.filter(event => event.type === 'subagent' && event.agent.state === 'done' && event.agent.text === 'Verified pi response').length, 2)
+        const researchRequests = requests.slice(delegationStart).filter(body => JSON.stringify(body.input).includes('You are a read-only research subagent'))
+        assert.equal(researchRequests.length, 4)
+        for (const request of researchRequests) {
+            const input = JSON.stringify(request.input)
+            assert.match(input, /fixture-skill/)
+            assert.match(input, /Research fixture system prompt/)
+            assert.match(input, /Research fixture project instructions/)
+            assert.ok(!(request.tools as {name: string}[]).some(tool => ['subagent', 'bash', 'write', 'edit'].includes(tool.name)))
+        }
+        await rm(systemFile)
+        await rm(projectInstructions)
         assert.doesNotMatch(JSON.stringify(requests.at(-1)), /Unverified preliminary hypothesis/)
         for (const invalid of ['SINGLE', 'DUPLICATE']) {
             const rejected = await run({...request(`chat-${invalid}`, `DELEGATE ${invalid}`), foremanMode: true})
@@ -380,6 +497,7 @@ test('pi runtime streams actual SDK events, gates writes, persists sessions, and
         assert.doesNotMatch(JSON.stringify(requests.at(-1)), /Meeting follow-up:/)
         console.log('Work brief request bytes', Buffer.byteLength(JSON.stringify(requests.at(-1))))
         await run({...request('chat-work-review', '审查会议纪要里的表格', 'review'), workspaceMode: 'work'})
+        assertReadOnlyTools()
         const reviewPrompt = JSON.stringify(requests.at(-1))
         assert.match(reviewPrompt, /Meeting follow-up:/)
         assert.match(reviewPrompt, /Data analysis:/)
@@ -408,11 +526,12 @@ test('pi runtime streams actual SDK events, gates writes, persists sessions, and
         approve = false
         await run(request('chat-denied', 'WRITE'))
         assert.ok(events.some(event => event.type === 'tool' && event.tool.state === 'error' && event.tool.output?.includes('denied')))
-        const next = config(); next.plugins['web-access'] = false; next.plugins.subagents = false; next.plugins.skills = false
+        const next = config(); next.plugins['web-access'] = false; next.plugins.subagents = false; next.plugins.mcp = false; next.plugins['plan-mode'] = false; next.plugins.skills = false
         await runtime.saveConfig(next)
         await run(request('chat-plugins', 'Hello'))
         const tools = requests[requests.length - 1].tools as {name: string}[]
         assert.ok(!tools.some(tool => ['web_fetch', 'subagent'].includes(tool.name)))
+        assert.doesNotMatch(JSON.stringify(requests.at(-1)!.input), /update_plan|modern_web_guidance_search|modern_web_guidance_retrieve/)
         const catalogConfig = config()
         catalogConfig.mcpServers = [{id: 'library', name: 'Library', enabled: true, transport: 'stdio', command: process.execPath,
             args: [path.resolve('tests/fixtures/mcp-server.mjs'), '--catalog']}]
@@ -440,7 +559,8 @@ test('pi runtime streams actual SDK events, gates writes, persists sessions, and
         assert.ok(!requestToolNames(pageStart).includes('read_tool_output'))
         assert.ok(requestToolNames(pageStart + 1).includes('read_tool_output'))
         assert.doesNotMatch(JSON.stringify(requests[pageStart + 1].input), /recovered middle/)
-        assert.ok(events.some(event => event.type === 'tool' && event.tool.name === 'read_tool_output'))
+        assert.ok(events.some(event => event.type === 'tool' && event.tool.name === 'read_tool_output' && event.tool.state === 'done'))
+        assert.match(JSON.stringify(requests[pageStart + 2].input), /recovered middle/)
         const savedConfig = await runtime.config()
         const isolatedConfig = config()
         isolatedConfig.mcpServers = [{id: 'test', name: 'Test', enabled: true, transport: 'stdio', command: process.execPath,
@@ -530,6 +650,13 @@ test('global skills import enabled across projects, toggle off, remove and valid
         for (const cwd of [a, b]) assert.ok((await runtime.workspace(cwd)).skills.some(skill => skill.name === 'global-fixture'))
         await runtime.saveConfig({...imported, globalSkills: imported.globalSkills!.map(skill => ({...skill, enabled: false}))})
         assert.ok(!(await runtime.workspace(a)).skills.some(skill => skill.name === 'global-fixture'))
+        const local = path.join(a, '.pi', 'skills', 'local-skill')
+        await mkdir(local, {recursive: true})
+        const localFile = path.join(local, 'SKILL.md')
+        for (const description of ['Initial description.', 'Updated outside the session.']) {
+            await writeFile(localFile, `---\nname: local-skill\ndescription: ${description}\n---\nUse local conventions.\n`)
+            assert.equal((await runtime.workspace(a)).skills.find(skill => skill.name === 'local-skill')?.description, description)
+        }
         await runtime.saveConfig({...imported, globalSkills: []})
         assert.ok(!(await runtime.workspace(b)).skills.some(skill => skill.name === 'global-fixture'))
     } finally { await runtime.dispose(); await rm(root, {recursive: true, force: true}) }

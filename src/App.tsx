@@ -1,7 +1,7 @@
 import {ChevronsUpDown, ChevronDown, Moon, MonitorOff, MonitorUp, Pause, ListChecks} from 'lucide-react'
 import {DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuGroup, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuLabel} from '@/components/ui/dropdown-menu'
 import type {WorkspaceMode} from '../shared/work'
-import {useEffect, useEffectEvent, useState} from "react"
+import {useEffect, useEffectEvent, useRef, useState} from "react"
 import {Archive, FolderOpen, Ellipsis as MoreHorizontal, Plus, Puzzle, Gear as Settings2, PencilToSquare as SquarePen} from "@gravity-ui/icons"
 import {TooltipProvider, Tooltip, TooltipContent, TooltipTrigger} from "@/components/ui/tooltip.tsx"
 import "./App.css"
@@ -48,6 +48,7 @@ import type {SleepMode} from '../shared/power'
 type ProjectEntry = { id: string; name: string; path: string }
 type ChatMessage = AgentMessage
 type ProjectChat = { workspaceMode?: WorkspaceMode; id: string; name: string; messages: ChatMessage[]; archived?: boolean; modelId?: string }
+type ProjectChats = Record<string, ProjectChat[]>
 
 const PROJECTS_STORAGE_KEY = "foreman_projects"
 const CHATS_STORAGE_KEY = "foreman_project_chats"
@@ -83,7 +84,16 @@ function readProjects(): ProjectEntry[] {
 
 export default function App() {
     const [projects, setProjects] = useState(readProjects)
-    const [projectChats, setProjectChats] = useState(() => readProjectChats(projects))
+    const [history, setHistory] = useState(() => ({chats: readProjectChats(projects), partial: false}))
+    const projectChats = history.chats
+    const saveTimer = useRef<number | undefined>(undefined)
+    const lastSaved = useRef<ProjectChats | undefined>(undefined)
+    function setProjectChats(update: (chats: ProjectChats) => ProjectChats, partial = false) {
+        setHistory(current => {
+            const chats = update(current.chats)
+            return chats === current.chats ? current : {chats, partial}
+        })
+    }
     const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>(() => localStorage.getItem('foreman_workspace_mode') === 'work' ? 'work' : 'code')
     const [activeChatIds, setActiveChatIds] = useState<Record<string, string>>({})
     const selectionKey = (projectId: string) => `${workspaceMode}:${projectId}`
@@ -120,17 +130,50 @@ export default function App() {
     }, [sleepMode])
 
     useAgentEvents((event) => {
-        if (event.type !== 'message') return
-        setProjectChats(current => Object.fromEntries(Object.entries(current).map(([projectId, chats]) => [projectId,
-            chats.map(chat => chat.id === event.chatId ? {...chat, messages: chat.messages.some(message => message.id === event.message.id)
-                ? chat.messages.map(message => message.id === event.message.id ? event.message : message)
-                : [...chat.messages, event.message]} : chat),
-        ])))
+        if (event.type !== 'message' && event.type !== 'plan') return
+        const message: AgentMessage = event.type === 'message' ? event.message : {
+            id: `plan-${event.runId}-${event.id ?? 'initial'}`, role: 'assistant', text: '', planSteps: event.steps,
+        }
+        setProjectChats(current => {
+            for (const projectId in current) {
+                const chats = current[projectId]
+                const chatIndex = chats.findIndex(chat => chat.id === event.chatId)
+                if (chatIndex < 0) continue
+                const chat = chats[chatIndex]
+                const last = chat.messages.length - 1
+                const index = chat.messages[last]?.id === message.id ? last : chat.messages.findIndex(item => item.id === message.id)
+                const messages = chat.messages.slice()
+                messages[index < 0 ? messages.length : index] = message
+                const updated = chats.slice()
+                updated[chatIndex] = {...chat, messages}
+                return {...current, [projectId]: updated}
+            }
+            return current
+        }, message.role === 'assistant' && !message.runSummary && !message.contextUsage)
     })
 
-    useEffect(() => {
+    const saveChats = useEffectEvent(() => {
+        window.clearTimeout(saveTimer.current)
+        saveTimer.current = undefined
+        if (lastSaved.current === projectChats) return
         window.localStorage.setItem(CHATS_STORAGE_KEY, JSON.stringify(projectChats))
-    }, [projectChats])
+        lastSaved.current = projectChats
+    })
+    useEffect(() => {
+        if (!history.partial) saveChats()
+        else if (saveTimer.current === undefined) saveTimer.current = window.setTimeout(saveChats, 500)
+    }, [history])
+    useEffect(() => {
+        const flush = () => saveChats()
+        const onVisibility = () => { if (document.hidden) flush() }
+        window.addEventListener('pagehide', flush)
+        document.addEventListener('visibilitychange', onVisibility)
+        return () => {
+            window.removeEventListener('pagehide', flush)
+            document.removeEventListener('visibilitychange', onVisibility)
+            flush()
+        }
+    }, [])
 
     function openPage(page: 'settings' | 'plugins' | 'background-tasks') {
         setSettingsOpen(page === 'settings')
@@ -363,7 +406,7 @@ export default function App() {
                                     <CollapsibleContent className="project-chat-collapse">
                                         <SidebarMenuSub className="project-chat-submenu">
                                             {(projectChats[project.id] ?? []).filter((chat) => inMode(chat) && !chat.archived).map((chat) => (
-                                                <SidebarMenuSubItem key={chat.id}>
+                                                <SidebarMenuSubItem key={`${project.id}:${chat.id}`}>
                                                     <SidebarMenuSubButton
                                                         size="sm"
                                                         render={<button type="button" />}

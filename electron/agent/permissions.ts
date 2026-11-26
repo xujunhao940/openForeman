@@ -1,6 +1,8 @@
 import {randomUUID} from 'node:crypto'
 import type {AgentConfig, AgentMode, PermissionRequest} from '../../shared/agent'
 
+export const mutatingProjectTools = new Set(['bash', 'edit', 'write'])
+
 export class PermissionGate {
     private pending = new Map<string, {runId: string; resolve: (approved: boolean) => void}>()
     constructor(private notify: (request: PermissionRequest) => void, private resolved: (id: string) => void) {}

@@ -1,8 +1,9 @@
 import {app, BrowserWindow, dialog, ipcMain} from 'electron'
 import path from 'node:path'
-import {readKey} from '../providers'
+import {ProviderCredentialError, readKey} from '../providers'
 import {AgentRuntime} from './runtime'
 import {serveAgent} from './http'
+import {saveUploads} from './uploads'
 import type {AgentConfig, QueueAction, RunRequest} from '../../shared/agent'
 import {SleepController} from '../power'
 import type {SleepMode} from '../../shared/power'
@@ -16,9 +17,18 @@ export function registerAgentHandlers() {
     ipcMain.handle('power:supported', () => sleepController.supported())
     ipcMain.handle('power:set-mode', (_event, mode: SleepMode) => sleepController.setMode(mode))
     ipcMain.handle('agent:config', () => runtime.config())
+    ipcMain.handle('agent:upload', (_event, cwd, files) => saveUploads(cwd, files))
     ipcMain.handle('agent:replay', () => runtime.replay())
     ipcMain.handle('agent:save-config', (_event, config: AgentConfig) => runtime.saveConfig(config))
     ipcMain.handle('agent:start', (_event, request: RunRequest) => runtime.start(request))
+    ipcMain.handle('agent:identify-feedforward', async (_event, text: string, provider, modelId: string) => {
+        try {
+            return await runtime.identifyFeedforward(text, provider, modelId)
+        } catch (error) {
+            if (error instanceof ProviderCredentialError) return {credentialError: error.message}
+            throw error
+        }
+    })
     ipcMain.handle('agent:stop', (_event, chatId: string) => runtime.stop(chatId))
     ipcMain.handle('agent:approve', (_event, id: string, approved: boolean) => runtime.approve(id, approved))
     ipcMain.handle('agent:enqueue', (_event, chatId: string, text: string) => runtime.enqueue(chatId, text))

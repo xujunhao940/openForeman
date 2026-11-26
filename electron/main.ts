@@ -44,8 +44,8 @@ let menuReady: Promise<boolean>
 
 function createWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize
-  const windowWidth = Math.min(850, width)
-  const windowHeight = Math.min(650, height)
+  const windowWidth = Math.min(1000, width)
+  const windowHeight = Math.min(800, height)
   win = new BrowserWindow({
     width: windowWidth,
     height: windowHeight,
@@ -61,6 +61,20 @@ function createWindow() {
   })
 
   const window = win
+  const openWebLink = (url: string) => {
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url).catch(console.error)
+  }
+  window.webContents.setWindowOpenHandler(({url}) => {
+    openWebLink(url)
+    return {action: 'deny'}
+  })
+  window.webContents.on('will-navigate', (event, url) => {
+    const page = new URL(window.webContents.getURL())
+    const target = new URL(url)
+    if (target.origin === page.origin && target.protocol === page.protocol) return
+    event.preventDefault()
+    openWebLink(url)
+  })
   const loadingView = new BrowserView()
   window.setBrowserView(loadingView)
   loadingView.setBounds({x: 0, y: 0, width: windowWidth, height: windowHeight})

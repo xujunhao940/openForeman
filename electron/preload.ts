@@ -67,9 +67,11 @@ const backgroundTasksAPI: BackgroundTasksAPI = {
 contextBridge.exposeInMainWorld('backgroundTasksAPI', backgroundTasksAPI)
 
 const agentAPI: AgentAPI = {
+  upload: (cwd, files) => ipcRenderer.invoke('agent:upload', cwd, files),
   config: () => ipcRenderer.invoke('agent:config'),
   saveConfig: config => ipcRenderer.invoke('agent:save-config', config),
   start: request => ipcRenderer.invoke('agent:start', request),
+  identifyFeedforward: (text, provider, modelId) => ipcRenderer.invoke('agent:identify-feedforward', text, provider, modelId),
   stop: chatId => ipcRenderer.invoke('agent:stop', chatId),
   approve: (id, approved) => ipcRenderer.invoke('agent:approve', id, approved),
   enqueue: (chatId, text) => ipcRenderer.invoke('agent:enqueue', chatId, text),

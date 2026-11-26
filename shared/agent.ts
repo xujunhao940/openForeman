@@ -36,8 +36,12 @@ export type QueueAction = {kind: 'edit'; text: string} | {kind: 'up' | 'down' | 
 export type ResponseUsage = {input: number; output: number; cacheRead: number; cacheWrite: number; total: number}
 export type ForemanDetails = {enabled: boolean; effort: 'low' | 'medium' | 'high' | 'xhigh'; maxSubagents: number}
 export type TurnChanges = {beforeId: string; afterId: string; files: TurnChangeFile[]}
-export type AgentMessage = {id: string; role: 'assistant' | 'user'; text: string; reasoning?: string; changes?: TurnChanges; contextUsage?: ContextUsage; runSummary?: boolean; usage?: ResponseUsage; durationMs?: number; modelId?: string; foreman?: ForemanDetails; delivery?: 'steer' | 'waitlist'}
+export type AgentMessage = {id: string; role: 'assistant' | 'user'; text: string; feedforwardDetails?: FeedforwardDetail[]; planSteps?: string[]; reasoning?: string; changes?: TurnChanges; contextUsage?: ContextUsage; runSummary?: boolean; usage?: ResponseUsage; durationMs?: number; modelId?: string; foreman?: ForemanDetails; delivery?: 'steer' | 'waitlist'}
+export const legacyHistoryLimits = {messages: 100, charactersPerMessage: 50_000} as const
 export type ReviewFile = {path: string; status: 'added' | 'modified' | 'deleted'; additions: number; deletions: number; patch: string; binary?: boolean; truncated?: boolean}
+export type FeedforwardControl = {type: 'color' | 'text' | 'checkbox' | 'select'; label: string; options?: string[]}
+export type FeedforwardSuggestion = {phrase: string; label: string; control: FeedforwardControl[]}
+export type FeedforwardDetail = {phrase: string; label: string; value: string}
 export type RunRequest = {
     chatId: string; projectPath: string; text: string; mode: AgentMode
     provider: Provider; modelId: string; effort: 'low' | 'medium' | 'high' | 'xhigh'
@@ -66,16 +70,18 @@ export type AgentEvent = {chatId: string; runId: string} & (
     {type: 'permission-resolved'; id: string} |
     {type: 'subagent'; agent: SubagentState} |
     {type: 'queue'; items: QueuedPrompt[]} |
-    {type: 'plan'; steps: string[]} |
+    {type: 'plan'; id?: string; steps: string[]} |
     {type: 'workspace'; workspace: WorkspaceState}
 )
 export interface AgentAPI {
+    upload(projectPath: string, files: {filename: string; url: string}[]): Promise<string[]>
     config(): Promise<AgentConfig>
     saveConfig(config: AgentConfig): Promise<AgentConfig>
     start(request: RunRequest): Promise<{runId: string}>
+    identifyFeedforward(text: string, provider: Provider, modelId: string): Promise<FeedforwardSuggestion[] | {credentialError: string}>
     stop(chatId: string): Promise<void>
     approve(id: string, approved: boolean): Promise<void>
-    enqueue(chatId: string, text: string): Promise<void>
+    enqueue(chatId: string, text: string): Promise<string>
     updateQueue(chatId: string, id: string, action: QueueAction): Promise<void>
     workspace(projectPath: string): Promise<WorkspaceState>
     saveMemory(projectPath: string, text: string): Promise<void>

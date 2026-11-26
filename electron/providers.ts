@@ -6,6 +6,8 @@ import {requestModels} from '../src/lib/provider-models'
 const credentialPath = () => path.join(app.getPath('userData'), 'provider-credentials.json')
 let writes = Promise.resolve()
 
+export class ProviderCredentialError extends Error {}
+
 function validateId(id: unknown): asserts id is string {
     if (typeof id !== 'string' || !/^[a-zA-Z0-9-]{1,100}$/.test(id)) throw new Error('Invalid provider ID.')
 }
@@ -35,8 +37,15 @@ export async function readKey(id: string) {
     await writes
     const encrypted = (await readCredentials())[id]
     if (!encrypted) return ''
-    if (!safeStorage.isEncryptionAvailable()) throw new Error('System credential encryption is unavailable.')
-    return safeStorage.decryptString(Buffer.from(encrypted, 'base64'))
+    if (!await safeStorage.isAsyncEncryptionAvailable()) {
+        throw new ProviderCredentialError('System credential storage is unavailable. Unlock it and try again.')
+    }
+    try {
+        const {result} = await safeStorage.decryptStringAsync(Buffer.from(encrypted, 'base64'))
+        return result
+    } catch {
+        throw new ProviderCredentialError('Could not unlock the saved API key. Re-enter it in Settings → Providers.')
+    }
 }
 
 export function registerProviderHandlers() {
@@ -44,12 +53,13 @@ export function registerProviderHandlers() {
         validateId(id)
         return readKey(id)
     })
-    ipcMain.handle('providers:save-key', (_event, id: unknown, key: unknown) => {
+    ipcMain.handle('providers:save-key', async (_event, id: unknown, key: unknown) => {
         validateId(id)
         if (typeof key !== 'string') throw new Error('Invalid API key.')
         if (!key) return changeCredentials(id)
-        if (!safeStorage.isEncryptionAvailable()) throw new Error('System credential encryption is unavailable.')
-        return changeCredentials(id, safeStorage.encryptString(key).toString('base64'))
+        if (!await safeStorage.isAsyncEncryptionAvailable()) throw new Error('System credential encryption is unavailable.')
+        const encrypted = await safeStorage.encryptStringAsync(key)
+        return changeCredentials(id, encrypted.toString('base64'))
     })
     ipcMain.handle('providers:delete-key', (_event, id: unknown) => {
         validateId(id)

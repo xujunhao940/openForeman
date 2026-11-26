@@ -1,8 +1,9 @@
 import {createHash, randomUUID} from 'node:crypto'
 import {formatPatch, structuredPatch} from 'diff'
 import {execFile} from 'node:child_process'
+import {constants} from 'node:fs'
 import {promisify} from 'node:util'
-import {mkdir, readFile, readdir, realpath, lstat, writeFile, rename, unlink, chmod} from 'node:fs/promises'
+import {mkdir, open, readFile, readdir, realpath, lstat, writeFile, rename, unlink, chmod} from 'node:fs/promises'
 import path from 'node:path'
 import type {CheckpointInfo, ReviewFile, TurnChanges} from '../../shared/agent'
 
@@ -48,15 +49,19 @@ export async function safeProjectFile(cwd: string, input: string) {
     return target
 }
 const excluded = new Set(['.git', 'node_modules', '.yarn', 'dist', 'dist-electron', 'release', '.DS_Store'])
-async function mapConcurrent<T, R>(items: T[], limit: number, map: (item: T) => Promise<R>): Promise<R[]> {
+async function mapConcurrent<T, R>(items: T[], limit: number, map: (item: T, signal: AbortSignal) => Promise<R>): Promise<R[]> {
     const results = new Array<R>(items.length)
+    const controller = new AbortController()
     let next = 0
     await Promise.all(Array.from({length: Math.min(limit, items.length)}, async () => {
-        while (next < items.length) {
-            const index = next++
-            results[index] = await map(items[index])
-        }
+        try {
+            while (!controller.signal.aborted && next < items.length) {
+                const index = next++
+                results[index] = await map(items[index], controller.signal)
+            }
+        } catch (error) { controller.abort(error) }
     }))
+    controller.signal.throwIfAborted()
     return results
 }
 async function walk(cwd: string, prefix = ''): Promise<string[]> {
@@ -84,6 +89,7 @@ type FileVersion = {content: string; mode: number}
 type Snapshot = {info: CheckpointInfo; files: Record<string, FileVersion>}
 type Manifest = {snapshots: CheckpointInfo[]; cursor: number}
 const same = (a?: FileVersion, b?: FileVersion) => a?.content === b?.content && a?.mode === b?.mode
+const base64Size = (bytes: number) => Math.ceil(bytes / 3) * 4
 export class CheckpointStore {
     constructor(private directory: string, private cwd: string) {}
     async state() { return readJson<Manifest>(path.join(this.directory, 'checkpoints.json'), {snapshots: [], cursor: -1}) }
@@ -92,14 +98,42 @@ export class CheckpointStore {
         if (!/^[a-f0-9-]{36}$/.test(id)) throw new Error('Invalid checkpoint ID.')
         return readJson<Snapshot>(path.join(this.directory, `${id}.json`), null)
     }
-    private async version(file: string): Promise<FileVersion | undefined> {
+    private async version(file: string, account?: (encodedBytes: number) => void, signal?: AbortSignal): Promise<FileVersion | undefined> {
         const target = await safeProjectFile(this.cwd, file)
         try {
-            const stat = await lstat(target)
-            if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`Checkpoint cannot include non-regular file: ${file}`)
-            if (stat.size > 8 * 1024 * 1024) throw new Error(`Checkpoint file exceeds 8 MiB: ${file}`)
-            return {content: (await readFile(target)).toString('base64'), mode: stat.mode & 0o777}
-        } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error }
+            signal?.throwIfAborted()
+            // Windows lacks O_NOFOLLOW. Verify the opened file against the inspected path there.
+            const entry = constants.O_NOFOLLOW ? undefined : await lstat(target)
+            if (entry && !entry.isFile()) throw new Error(`Checkpoint cannot include non-regular file: ${file}`)
+            const handle = await open(target, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0))
+            try {
+                const stat = await handle.stat()
+                if (!stat.isFile()) throw new Error(`Checkpoint cannot include non-regular file: ${file}`)
+                if (entry && (entry.dev !== stat.dev || entry.ino !== stat.ino)) throw new Error(`File changed while opening checkpoint: ${file}`)
+                if (stat.size > 8 * 1024 * 1024) throw new Error(`Checkpoint file exceeds 8 MiB: ${file}`)
+                signal?.throwIfAborted()
+                const reserved = base64Size(stat.size)
+                account?.(reserved)
+                // One extra byte detects growth without allocating for an unbounded, changing file.
+                const buffer = Buffer.allocUnsafe(stat.size + 1)
+                let size = 0
+                do {
+                    signal?.throwIfAborted()
+                    const {bytesRead} = await handle.read(buffer, size, buffer.length - size)
+                    if (!bytesRead) break
+                    size += bytesRead
+                } while (size < buffer.length)
+                if (size > stat.size) throw new Error(`File grew while creating checkpoint: ${file}. Retry after writes finish.`)
+                signal?.throwIfAborted()
+                if (size < stat.size) account?.(base64Size(size) - reserved)
+                return {content: buffer.toString('base64', 0, size), mode: stat.mode & 0o777}
+            } finally { await handle.close() }
+        } catch (error) {
+            const code = (error as NodeJS.ErrnoException).code
+            if (code === 'ENOENT') return
+            if (code === 'ELOOP') throw new Error(`Checkpoint cannot include non-regular file: ${file}`)
+            throw error
+        }
     }
     async capture(label: string) {
         return (await this.captureSnapshot(label)).snapshot.info
@@ -117,12 +151,15 @@ export class CheckpointStore {
         if (names.length > 4000) throw new Error('Checkpoint limit: 4,000 files.')
         const files: Snapshot['files'] = {}
         let size = 0
-        const versions = await mapConcurrent(names, 16, name => this.version(name))
+        const account = (encodedBytes: number) => {
+            size += encodedBytes
+            if (size > 48 * 1024 * 1024) throw new Error('Checkpoint exceeds 36 MiB. Ignore large generated files first.')
+        }
+        const versions = await mapConcurrent(names, 16, (name, signal) => this.version(name, account, signal))
         for (let index = 0; index < names.length; index++) {
             const name = names[index]
             const value = versions[index]
-            if (value) { files[name] = value; size += value.content.length }
-            if (size > 48 * 1024 * 1024) throw new Error('Checkpoint exceeds 36 MiB. Ignore large generated files first.')
+            if (value) files[name] = value
         }
         const state = await this.state()
         const current = state.snapshots[state.cursor]

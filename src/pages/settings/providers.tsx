@@ -17,12 +17,14 @@ export default function ProvidersSettings({values, update}: SettingsPageProps) {
     const [busy, setBusy] = useState('')
     const [error, setError] = useState('')
     const [formError, setFormError] = useState('')
+    const [replaceKey, setReplaceKey] = useState(false)
     const [status, setStatus] = useState('')
     const mounted = useRef(true)
     useEffect(() => {mounted.current = true; return () => {mounted.current = false}}, [])
 
     async function edit(provider: Provider) {
         setError('')
+        setReplaceKey(false)
         setBusy(provider.id)
         try {
             const key = await readProviderKey(provider.id)
@@ -30,7 +32,14 @@ export default function ProvidersSettings({values, update}: SettingsPageProps) {
             setApiKey(key)
             setFormError('')
             setDraft({...provider})
-        } catch {if (mounted.current) setError('Could not unlock this provider’s API key. Please try again.')}
+        } catch {
+            if (mounted.current) {
+                setDraft({...provider})
+                setApiKey('')
+                setReplaceKey(true)
+                setFormError('Could not unlock the saved API key. Enter it again to save this provider.')
+            }
+        }
         finally {if (mounted.current) setBusy('')}
     }
 
@@ -42,7 +51,7 @@ export default function ProvidersSettings({values, update}: SettingsPageProps) {
         try {
             if (!provider.name) throw new Error('Enter a provider name.')
             modelsEndpoint(provider.baseUrl)
-            if (provider.preset === 'openai' && !apiKey.trim()) throw new Error('Enter an OpenAI API key.')
+            if ((replaceKey || provider.preset !== 'custom') && !apiKey.trim()) throw new Error('Enter an API key.')
             setBusy(provider.id)
             await saveProviderKey(provider.id, apiKey.trim())
             if (!mounted.current) return
@@ -83,7 +92,7 @@ export default function ProvidersSettings({values, update}: SettingsPageProps) {
 
     return <div className="settings-fields">
         <div className="providers-toolbar"><p className="settings-section-intro">Connect providers and fetch their available models.</p>
-            <Button size="sm" disabled={!!busy} onClick={() => {setDraft(newProvider()); setApiKey(''); setFormError('')}}><Plus data-icon="inline-start" />Add Provider</Button>
+            <Button size="sm" disabled={!!busy} onClick={() => {setDraft(newProvider()); setApiKey(''); setFormError(''); setReplaceKey(false)}}><Plus data-icon="inline-start" />Add Provider</Button>
         </div>
         {error && <p role="alert" className="settings-error">{error}</p>}
         {status && <p role="status" className="settings-list-summary">{status}</p>}
@@ -115,7 +124,7 @@ export default function ProvidersSettings({values, update}: SettingsPageProps) {
                         </Field>
                         <Field><FieldLabel htmlFor="provider-name">Name</FieldLabel><Input id="provider-name" value={draft.name} onChange={(event) => setDraft({...draft, name: event.target.value})} placeholder="My provider" required maxLength={100} /></Field>
                         <Field><FieldLabel htmlFor="provider-base-url">Base URL</FieldLabel><Input id="provider-base-url" type="url" value={draft.baseUrl} onChange={(event) => setDraft({...draft, baseUrl: event.target.value})} placeholder="https://api.example.com/v1" required aria-describedby="provider-url-help" /><p id="provider-url-help" className="provider-field-help">Models are fetched from your base URL + /models.</p></Field>
-                        <Field><FieldLabel htmlFor="provider-api-key">API key{draft.preset === 'custom' ? ' (optional)' : ''}</FieldLabel><Input id="provider-api-key" type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="sk-..." required={draft.preset !== 'custom'} /></Field>
+                        <Field><FieldLabel htmlFor="provider-api-key">API key{draft.preset === 'custom' && !replaceKey ? ' (optional)' : ''}</FieldLabel><Input id="provider-api-key" type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="sk-..." required={replaceKey || draft.preset !== 'custom'} /></Field>
                     </div>
                 </fieldset>
                 {formError && <p role="alert" className="settings-error">{formError}</p>}
